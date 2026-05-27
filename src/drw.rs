@@ -189,7 +189,7 @@ impl Drw {
                 return None;
             };
         } else {
-            die("no font specified.");
+            die!("no font specified.");
         }
 
         let font = Box::new(Fnt {
@@ -207,7 +207,7 @@ impl Drw {
         let mut prev: Option<NonNull<Fnt>> = None;
 
         if fonts.is_empty() {
-            die("We need at least 1 font");
+            die!("We need at least 1 font");
         }
 
         for name in fonts.iter().rev() {
@@ -232,17 +232,14 @@ impl Drw {
             )
         } == 0
         {
-            die(&format!(
-                "error, cannot allocate color '{}'",
-                clrname.to_string_lossy()
-            ));
+            die!("error, cannot allocate color '{}'", clrname.to_string_lossy());
         }
     }
 
     pub(crate) fn scm_create(&mut self, clrnames: &[&str]) -> Rc<[Clr]> {
         // need at least 2 colors for a scheme
         if clrnames.len() < 2 {
-            die("We need at least 2 colors for a scheme");
+            die!("We need at least 2 colors for a scheme");
         }
 
         let mut ret = vec![MaybeUninit::uninit(); clrnames.len()].into_boxed_slice();
@@ -535,7 +532,7 @@ impl Drw {
                 if let Some(font) = self.fonts
                     && unsafe { font.as_ref() }.pattern.is_none()
                 {
-                    die("the first font in the cache must be loaded from a font string.");
+                    die!("the first font in the cache must be loaded from a font string.");
                 }
 
                 fcpattern = unsafe {

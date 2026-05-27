@@ -10,8 +10,6 @@ use crate::config::DEMENUCMD;
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
 
-use util::die;
-
 mod config;
 mod drw;
 mod external_functions;
@@ -468,7 +466,7 @@ fn spawn(arg: &Arg, globals: &mut Globals) {
         unsafe {
             libc::execvp(com[0], com.as_ptr());
         }
-        die("dwm: execvp failed");
+        die!("dwm: execvp failed");
     }
 }
 
@@ -1340,7 +1338,7 @@ extern "C" fn xerrordummy(_dpy: *mut Display, _ee: *mut XErrorEvent) -> i32 {
 }
 
 extern "C" fn xerrorstart(_dpy: *mut Display, _ee: *mut XErrorEvent) -> i32 {
-    die("dwm: another window manager is already running");
+    die!("dwm: another window manager is already running");
 
     #[allow(unreachable_code)]
     // might be necessary for ABI compatability, even though `die` calls the exit syscal.
@@ -3160,7 +3158,7 @@ fn setup(dpy: NonNull<Display>) -> Globals {
     drw.fontset_create(config::FONTS);
 
     let Some(drw_fonts) = drw.fonts else {
-        die("no fonts could be loaded");
+        die!("no fonts could be loaded");
     };
 
     let lrpad = unsafe { drw_fonts.as_ref() }.h as i32;
@@ -3414,9 +3412,9 @@ fn main() {
     let args = std::env::args().collect::<Vec<_>>();
 
     if args.len() == 2 && args[1] == "-v" {
-        die(&format!("dwm-{}", VERSION));
+        die!("dwm-{}", VERSION);
     } else if args.len() != 1 {
-        die("usage: dwm [-v]");
+        die!("usage: dwm [-v]");
     }
 
     if unsafe { libc::setlocale(libc::LC_CTYPE, c"".as_ptr()).is_null() }
@@ -3426,7 +3424,7 @@ fn main() {
     }
 
     let Some(dpy) = NonNull::new(unsafe { XOpenDisplay(core::ptr::null_mut()) }) else {
-        die("dwm: cannot open display");
+        die!("dwm: cannot open display");
     };
 
     checkotherwm(dpy);
