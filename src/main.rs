@@ -207,43 +207,47 @@ type HandlerFunction = fn(&mut XEvent, &mut Globals);
 // read only in xerror thereafter.
 static XERRORXLIB: AtomicUsize = AtomicUsize::new(0);
 const BROKEN: &CStr = c"broken";
+// Indexed by X11 event type (0..LAST_EVENT). X11 event types start at 2;
+// indices 0 and 1 are unused. This matches the C designated-initializer table:
+//   static void (*handler[LASTEvent])(XEvent *) = { [ButtonPress]=buttonpress, ... }
+// LAST_EVENT=36, so the array has 36 entries covering types 0-35.
 const HANDLER: [Option<HandlerFunction>; LAST_EVENT as usize] = [
-    None,                   // None
-    None,                   // None
-    Some(keypress),         // KeyPress
-    Some(buttonpress),      // ButtonPress
-    None,                   // ButtonRelease
-    Some(motionnotify),     // MotionNoftify
-    Some(enternotify),      // EnterNotify
-    None,                   // LeaveNotify
-    Some(focusin),          // FocusIn
-    None,                   // FocusOut
-    None,                   // KeymapNotify
-    Some(expose),           // Expose
-    None,                   // GraphicsExpose
-    None,                   // NoExpose
-    None,                   // VisibilityNotify
-    None,                   // CreateNotify
-    Some(destroynotify),    // DestroyNotify
-    Some(unmapnotify),      // UnmapNotify
-    None,                   // MapNotify
-    Some(maprequest),       // MapRequest
-    None,                   // ReparentNotify
-    Some(configurenotify),  // ConfigureNotify
-    Some(configurerequest), // ConfigureRequest
-    None,                   // GravityNotify
-    None,                   // ResizeRequest
-    None,                   // CirculateNotify
-    None,                   // CirculateRequest
-    Some(propertynotify),   // PropertyNotify
-    None,                   // SelectionClear
-    None,                   // SelectionRequest
-    None,                   // SelectionNotify
-    None,                   // ColormapNotify
-    Some(clientmessage),    // ClientMessage
-    Some(mappingnotify),    // MappingNotify
-    None,                   // GenericEvent
-    None,                   // LASTEvent
+    None,                   // 0  — unused
+    None,                   // 1  — unused
+    Some(keypress),         // 2  KeyPress
+    None,                   // 3  KeyRelease
+    Some(buttonpress),      // 4  ButtonPress
+    None,                   // 5  ButtonRelease
+    Some(motionnotify),     // 6  MotionNotify
+    Some(enternotify),      // 7  EnterNotify
+    None,                   // 8  LeaveNotify
+    Some(focusin),          // 9  FocusIn
+    None,                   // 10 FocusOut
+    None,                   // 11 KeymapNotify
+    Some(expose),           // 12 Expose
+    None,                   // 13 GraphicsExpose
+    None,                   // 14 NoExpose
+    None,                   // 15 VisibilityNotify
+    None,                   // 16 CreateNotify
+    Some(destroynotify),    // 17 DestroyNotify
+    Some(unmapnotify),      // 18 UnmapNotify
+    None,                   // 19 MapNotify
+    Some(maprequest),       // 20 MapRequest
+    None,                   // 21 ReparentNotify
+    Some(configurenotify),  // 22 ConfigureNotify
+    Some(configurerequest), // 23 ConfigureRequest
+    None,                   // 24 GravityNotify
+    None,                   // 25 ResizeRequest
+    None,                   // 26 CirculateNotify
+    None,                   // 27 CirculateRequest
+    Some(propertynotify),   // 28 PropertyNotify
+    None,                   // 29 SelectionClear
+    None,                   // 30 SelectionRequest
+    None,                   // 31 SelectionNotify
+    None,                   // 32 ColormapNotify
+    Some(clientmessage),    // 33 ClientMessage
+    Some(mappingnotify),    // 34 MappingNotify
+    None,                   // 35 GenericEvent
 ];
 
 #[derive(Debug)]
@@ -494,13 +498,14 @@ fn setlayout(arg: &Arg, globals: &mut Globals) {
         (unsafe { globals.selmon.as_mut() }.lt)
             [unsafe { globals.selmon.as_ref() }.sellt as usize] = l;
     }
+    // symbol is &str (not null-terminated); build a CString first, matching arrangemon.
+    let sellt = unsafe { globals.selmon.as_ref() }.sellt as usize;
+    let symbol = CString::new(unsafe { globals.selmon.as_ref() }.lt[sellt].symbol)
+        .expect("layout symbol is valid CString");
     unsafe {
         libc::strncpy(
             globals.selmon.as_mut().ltsymbol.as_mut_ptr(),
-            globals.selmon.as_ref().lt[globals.selmon.as_ref().sellt as usize]
-                .symbol
-                .as_ptr()
-                .cast(),
+            symbol.as_ptr(),
             globals.selmon.as_ref().ltsymbol.len(),
         )
     };
@@ -973,13 +978,15 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
     if ev.window == unsafe { globals.selmon.as_ref() }.barwin {
         let mut i = 0;
         let mut x = 0;
-        // (drw_fontset_getwidth(drw, (tags[i])) + lrpad)
         loop {
             let ctag = CString::new(config::TAGS[i]).expect("valid CStr");
             x += text_w(ctag.as_ptr(), globals);
+            if ev.x < x {
+                break; // clicked on tag i — don't increment, matches C do-while break
+            }
             i += 1;
-            if ev.x < x || i > config::TAGS.len() {
-                break;
+            if i >= config::TAGS.len() {
+                break; // clicked past all tags — i == TAGS.len(), matches C's ++i >= LENGTH
             }
         }
 

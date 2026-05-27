@@ -471,7 +471,7 @@ pub const BUTTONS: &[Button] = &[
         mask: 0,
         button: BUTTON1,
         func: Some(crate::setlayout),
-        arg: crate::Arg::I(0),
+        arg: crate::Arg::Layout(None),
     },
     Button {
         click: ClickState::LtSymbol,
