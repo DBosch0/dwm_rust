@@ -309,9 +309,14 @@ fn tile(m: &mut Monitor, globals: &mut Globals) {
     c = nexttiled(m.clients);
 
     while let Some(mut c_inner) = c {
-        let (bw, height, next) = unsafe {
+        // Read bw and next before the mutable resize borrow.
+        // Do NOT read height() here — C reads HEIGHT(c) *after* resize so it
+        // reflects the actual post-resize height (including any applysizehints
+        // adjustment).  Reading it before would use the stale pre-tile height,
+        // causing wrong my/ty increments from the 3rd client onwards.
+        let (bw, next) = unsafe {
             let r = c_inner.as_ref();
-            (r.bw, r.height(), r.next)
+            (r.bw, r.next)
         };
         if i < m.nmaster as u32 {
             let h: u32 = (m.wh as u32 - my) / (n.min(m.nmaster as u32) - i);
@@ -324,6 +329,8 @@ fn tile(m: &mut Monitor, globals: &mut Globals) {
                 false,
                 globals,
             );
+            // HEIGHT(c) after resize = c.h + 2*c.bw; matches C's post-resize read
+            let height = unsafe { c_inner.as_ref() }.height();
             if my as i32 + height < m.wh {
                 my += height as u32;
             }
@@ -338,6 +345,7 @@ fn tile(m: &mut Monitor, globals: &mut Globals) {
                 false,
                 globals,
             );
+            let height = unsafe { c_inner.as_ref() }.height();
             if ty as i32 + height < m.wh {
                 ty += height as u32;
             }
