@@ -138,40 +138,38 @@ impl Drw {
 
     fn xfont_create(
         &mut self,
-        fontname: &str,
+        fontname: Option<&str>,
         fontpattern: Option<NonNull<FcPattern>>,
     ) -> Option<NonNull<Fnt>> {
         let xfont: NonNull<XftFont>;
         let mut pattern: Option<NonNull<FcPattern>> = None;
 
-        let fontname = CString::new(fontname).expect("name is a valid CString");
-
-        if !fontname.is_empty() {
+        if let Some(name) = fontname {
             /* Using the pattern found at font->xfont->pattern does not yield the
              * same substitution results as using the pattern returned by
              * FcNameParse; using the latter results in the desired fallback
              * behaviour whereas the former just results in missing-character
              * rectangles being drawn, at least with some fonts. */
-
+            let name = CString::new(name).expect("fontname is a valid CString");
             xfont = if let Some(xfont) = NonNull::new(unsafe {
-                XftFontOpenName(self.dpy.as_ptr(), self.screen, fontname.as_ptr())
+                XftFontOpenName(self.dpy.as_ptr(), self.screen, name.as_ptr())
             }) {
                 xfont
             } else {
                 let _ = writeln!(
                     stderr(),
                     "error, cannot load font from name: '{}'",
-                    fontname.to_string_lossy()
+                    name.to_string_lossy()
                 );
                 return None;
             };
 
-            pattern = NonNull::new(unsafe { FcNameParse(fontname.as_ptr().cast::<FcChar8>()) });
+            pattern = NonNull::new(unsafe { FcNameParse(name.as_ptr().cast::<FcChar8>()) });
             if pattern.is_none() {
                 let _ = writeln!(
                     stderr(),
                     "error, cannot parse font name to pattern: '{}'",
-                    fontname.to_string_lossy()
+                    name.to_string_lossy()
                 );
                 unsafe { XftFontClose(self.dpy.as_ptr(), xfont.as_ptr()) };
                 return None;
@@ -185,8 +183,6 @@ impl Drw {
                 let _ = writeln!(stderr(), "error, cannot load font from pattern");
                 return None;
             };
-            //TODO: checkif this is correct.
-            // pattern = Some(fontpattern);
         } else {
             die("no font specified.");
         }
@@ -209,10 +205,9 @@ impl Drw {
             die("We need at least 1 font");
         }
 
-        for i in (1..=fonts.len()).rev() {
-            if let Some(mut cur) = self.xfont_create(fonts[fonts.len() - i], None) {
+        for name in fonts.iter().rev() {
+            if let Some(mut cur) = self.xfont_create(Some(name), None) {
                 unsafe { cur.as_mut() }.next = prev;
-                // cur.borrow_mut().next = prev;
                 prev = Some(cur);
             }
         }
@@ -247,8 +242,8 @@ impl Drw {
 
         let mut ret = vec![MaybeUninit::uninit(); clrnames.len()].into_boxed_slice();
 
-        for i in 0..clrnames.len() {
-            self.clr_create(&mut ret[i], clrnames[i]);
+        for (i, name) in clrnames.iter().enumerate() {
+            self.clr_create(&mut ret[i], name);
         }
         let ret: Rc<[Clr]> = Rc::from(unsafe { ret.assume_init() });
         ret
@@ -272,10 +267,6 @@ impl Drw {
             self.clr_free(clr);
         }
     }
-
-    // pub(crate) fn setfontset(&mut self, fnt: NonNull<Fnt>) {
-    //     self.fonts = Some(fnt);
-    // }
 
     pub(crate) fn setscheme(&mut self, scm: Rc<[Clr]>) {
         self.scheme = Some(scm);
@@ -579,7 +570,7 @@ impl Drw {
 
                 if let Some(match_) = match_ {
                     // let mut usedfont = ;
-                    if let Some(uf) = self.xfont_create("", Some(match_))
+                    if let Some(uf) = self.xfont_create(None, Some(match_))
                         && unsafe {
                             XftCharExists(
                                 self.dpy.as_ptr(),
@@ -599,8 +590,6 @@ impl Drw {
                         }
                         usedfont = uf;
                     } else {
-                        //TODO:xfont_free destructor;
-                        // self.xfont_free(usedfont)
                         unsafe {
                             NOMATCHES[if NOMATCHES[h0 as usize] != 0 {
                                 h1 as usize
@@ -645,14 +634,6 @@ impl Drw {
 
         self.text(0, 0, 0, 0, 0, text, false) as u32
     }
-
-    // fn fontset_getwidth_clamp(&mut self, text: *const i8, n: u32) -> u32 {
-    //     let mut tmp = 0u32;
-    //     if self.fonts.is_some() && !text.is_null() && n > 0 {
-    //         tmp = self.text(0, 0, 0, 0, 0, text, true) as u32
-    //     }
-    //     n.min(tmp)
-    // }
 
     pub(crate) fn cur_create(&mut self, shape: u32) -> Cur {
         Cur {
