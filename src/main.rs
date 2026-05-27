@@ -267,6 +267,7 @@ struct Globals {
     selmon: NonNull<Monitor>,
     root: Window,
     wmcheckwin: Window,
+    last_motion_mon: Option<NonNull<Monitor>>,
 }
 
 fn nexttiled(mut c: Option<NonNull<Client>>) -> Option<NonNull<Client>> {
@@ -437,18 +438,20 @@ fn spawn(arg: &Arg, globals: &mut Globals) {
         unreachable!("invalid argument for spawn function")
     };
 
-    let mut cs_arr: Vec<CString> = Vec::new();
-    let mut com: Box<[*const i8]> = vec![core::ptr::null(); arr.len()].into_boxed_slice();
-    for (i, &elem) in arr.iter().enumerate() {
-        let s = if elem == "PLACEHOLDER" && arr == &DEMENUCMD {
-            &format!("{}", unsafe { globals.selmon.as_ref() }.num)
-        } else {
-            elem
-        };
-        let cs = CString::new(s).expect("valid CStr");
-        cs_arr.push(cs);
-        com[i] = cs_arr[i].as_ptr();
-    }
+    let mon_num = unsafe { globals.selmon.as_ref() }.num;
+    let cs_arr: Vec<CString> = arr
+        .iter()
+        .map(|&elem| {
+            let s = if elem == "PLACEHOLDER" && arr == &DEMENUCMD {
+                format!("{}", mon_num)
+            } else {
+                elem.to_string()
+            };
+            CString::new(s).expect("valid CStr")
+        })
+        .collect();
+    let mut com: Vec<*const i8> = cs_arr.iter().map(|cs| cs.as_ptr()).collect();
+    com.push(core::ptr::null()); // null terminator required by execvp
 
     if unsafe { libc::fork() } == 0 {
         // TODO: dwm does a check here is to see if dpy is null? Im not sure if it ever can be?
@@ -1244,34 +1247,34 @@ fn mappingnotify(ev: &mut XEvent, globals: &mut Globals) {
 }
 
 fn maprequest(ev: &mut XEvent, globals: &mut Globals) {
-    static mut WA: XWindowAttributes = unsafe { core::mem::zeroed() };
+    let mut wa: XWindowAttributes = unsafe { core::mem::zeroed() };
     let ev: &mut XMapRequestEvent = unsafe { &mut ev.xmaprequest };
 
-    if unsafe { XGetWindowAttributes(globals.dpy.as_ptr(), ev.window, &raw mut WA) } == 0
-        || unsafe { WA.override_redirect } != 0
+    if unsafe { XGetWindowAttributes(globals.dpy.as_ptr(), ev.window, &mut wa) } == 0
+        || wa.override_redirect != 0
     {
         return;
     }
-    #[allow(static_mut_refs)]
     if wintoclient(ev.window, globals).is_none() {
-        manage(ev.window, unsafe { &WA }, globals);
+        manage(ev.window, &wa, globals);
     }
 }
 
 fn motionnotify(ev: &mut XEvent, globals: &mut Globals) {
-    static mut MON: *mut Monitor = core::ptr::null_mut();
     let ev: &mut XMotionEvent = unsafe { &mut ev.xmotion };
 
     if ev.window != globals.root {
         return;
     }
     let m = recttomon(ev.x_root, ev.y_root, 1, 1, globals);
-    if m.as_ptr() != unsafe { MON } && !unsafe { MON.is_null() } {
+    if let Some(last) = globals.last_motion_mon
+        && last != m
+    {
         unfocus(unsafe { globals.selmon.as_ref() }.sel, true, globals);
         globals.selmon = m;
         focus(None, globals);
     }
-    unsafe { MON = m.as_ptr() };
+    globals.last_motion_mon = Some(m);
 }
 
 fn propertynotify(ev: &mut XEvent, globals: &mut Globals) {
@@ -1476,7 +1479,7 @@ fn updatewmhints(mut c: NonNull<Client>, globals: &Globals) {
     const INPUT_HINT: i64 = 1 << 0;
     const X_URGENCY_HINT: i64 = 1 << 8;
 
-    let wmh: *mut XWMHints = unsafe { XGetWMHints(globals.dpy.as_ptr(), c.as_ref().w as u64) };
+    let wmh: *mut XWMHints = unsafe { XGetWMHints(globals.dpy.as_ptr(), c.as_ref().win) };
     if !wmh.is_null() {
         if let Some(sel) = unsafe { globals.selmon.as_ref() }.sel
             && c == sel
@@ -1669,7 +1672,7 @@ fn gettextprop(w: Window, atom: Atom, text: *mut i8, size: u32, globals: &Global
 }
 
 fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
-    let tw = 0i32;
+    let mut tw = 0i32;
     let boxs = unsafe {
         globals
             .drw
@@ -1700,8 +1703,7 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
             .drw
             .setscheme(Rc::clone(&globals.scheme[SchemeState::Norm as usize]));
 
-        // dbg!(globals.stext);
-        let tw = globals
+        tw = globals
             .drw
             .as_mut()
             .fontset_getwidth(&globals.stext as *const i8) as i32
@@ -2217,7 +2219,7 @@ fn focus(mut c: Option<NonNull<Client>>, globals: &mut Globals) {
         while let Some(c_inner) = c
             && !is_visible(c_inner)
         {
-            c = unsafe { c_inner.as_ref() }.next;
+            c = unsafe { c_inner.as_ref() }.snext;
         }
     }
     if let Some(sel) = unsafe { globals.selmon.as_ref() }.sel
@@ -2717,12 +2719,13 @@ fn restack(m: NonNull<Monitor>, globals: &mut Globals) {
 
     drawbar(m, globals);
     let m = unsafe { m.as_ref() };
+    if m.sel.is_none() {
+        return;
+    }
     if let Some(sel) = m.sel
         && (unsafe { sel.as_ref() }.isfloating || m.lt[m.sellt as usize].arrange.is_none())
     {
         unsafe { XRaiseWindow(globals.dpy.as_ptr(), sel.as_ref().win) };
-    } else {
-        return;
     }
     if m.lt[m.sellt as usize].arrange.is_some() {
         wc.stack_mode = BELOW;
@@ -3182,6 +3185,7 @@ fn setup(dpy: NonNull<Display>) -> Globals {
         selmon: NonNull::dangling(),
         root,
         wmcheckwin: 0,
+        last_motion_mon: None,
     };
 
     updategeom(&mut globals);
