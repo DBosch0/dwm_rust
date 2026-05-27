@@ -1,10 +1,9 @@
-// #![allow(dead_code)]
-
 use std::ffi::{CStr, CString};
 use std::io::{Write, stderr};
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
@@ -203,7 +202,10 @@ fn cleanmask(mask: u32, globals: &Globals) -> u32 {
 
 type HandlerFunction = fn(&mut XEvent, &mut Globals);
 
-static mut XERRORXLIB: extern "C" fn(*mut Display, *mut XErrorEvent) -> i32 = xerrorstart;
+// dwm is single-threaded; Relaxed ordering is sufficient.
+// Written once in checkotherwm before any X error can occur;
+// read only in xerror thereafter.
+static XERRORXLIB: AtomicUsize = AtomicUsize::new(0);
 const BROKEN: &CStr = c"broken";
 const HANDLER: [Option<HandlerFunction>; LAST_EVENT as usize] = [
     None,                   // None
@@ -1371,20 +1373,24 @@ extern "C" fn xerror(dpy: *mut Display, ee: *mut XErrorEvent) -> i32 {
         ee.request_code,
         ee.error_code
     );
-    (unsafe { XERRORXLIB })(dpy, ee)
+    // SAFETY: XERRORXLIB is always set in checkotherwm before xerror can be called.
+    let xlib: extern "C" fn(*mut Display, *mut XErrorEvent) -> i32 =
+        unsafe { core::mem::transmute(XERRORXLIB.load(Ordering::Relaxed)) };
+    xlib(dpy, ee)
 }
 
 fn checkotherwm(dpy: NonNull<Display>) {
+    XERRORXLIB.store(
+        unsafe { XSetErrorHandler(xerrorstart) } as usize,
+        Ordering::Relaxed,
+    );
+    /* this causes an error if some other window manager is running */
     unsafe {
-        XERRORXLIB = XSetErrorHandler(xerrorstart);
-        /* this causes an error if some other window manager is running */
-
         XSelectInput(
             dpy.as_ptr(),
             default_root_window(dpy.as_ptr()),
             SUBSTRUCTURE_REDIRECT_MASK,
         );
-
         XSync(dpy.as_ptr(), 0);
         XSetErrorHandler(xerror);
         XSync(dpy.as_ptr(), 0);
@@ -1649,7 +1655,6 @@ fn gettextprop(w: Window, atom: Atom, text: *mut i8, size: u32, globals: &Global
     }
     if name.encoding == XA_STRING {
         unsafe { libc::strncpy(text, name.value as *const i8, size as usize - 1) };
-        // unsafe { text.copy_from(name.value as *mut i8, size as usize - 1) };
     } else if unsafe { XmbTextPropertyToTextList(globals.dpy.as_ptr(), &name, &mut list, &mut n) }
         >= SUCCESS as i32
         && n > 0
@@ -1666,23 +1671,16 @@ fn gettextprop(w: Window, atom: Atom, text: *mut i8, size: u32, globals: &Global
 
 fn drawbar(m: &Monitor, globals: &mut Globals) {
     let mut tw = 0i32;
-    let boxs = unsafe {
+    let font_h = unsafe {
         globals
             .drw
             .fonts
             .expect("checked at init that at least 1 font exists")
             .as_ref()
             .h
-    } / 9;
-    let boxw = unsafe {
-        globals
-            .drw
-            .fonts
-            .expect("checked at init that at least 1 font exists")
-            .as_ref()
-            .h
-    } / 6
-        + 2;
+    };
+    let boxs = font_h / 9;
+    let boxw = font_h / 6 + 2;
     let mut occ = 0u32;
     let mut urg = 0u32;
 
@@ -1870,7 +1868,6 @@ fn updatenumlockmask(globals: &mut Globals) {
 fn grabkeys(globals: &mut Globals) {
     updatenumlockmask(globals);
     {
-        const LOCK_MASK: u32 = 1 << 1;
         let modifiers = [
             0,
             LOCK_MASK,
@@ -1883,7 +1880,6 @@ fn grabkeys(globals: &mut Globals) {
         let mut skip = 0;
 
         const ANY_KEY: i32 = 0;
-        const ANY_MODIFIER: u32 = 1 << 15;
 
         unsafe { XUngrabKey(globals.dpy.as_ptr(), ANY_KEY, ANY_MODIFIER, globals.root) };
         unsafe { XDisplayKeycodes(globals.dpy.as_ptr(), &mut start, &mut end) };
@@ -1898,8 +1894,6 @@ fn grabkeys(globals: &mut Globals) {
         if syms.is_null() {
             return;
         }
-
-        const GRAB_MODE_ASYNC: i32 = 1;
 
         for k in start..=end {
             for i in 0..config::KEYS.len() {
@@ -1930,7 +1924,6 @@ fn grabkeys(globals: &mut Globals) {
 fn grabbuttons(c: &Client, focused: bool, globals: &mut Globals) {
     updatenumlockmask(globals);
     {
-        const LOCK_MASK: u32 = 1 << 1;
         let modifiers = [
             0,
             LOCK_MASK,
@@ -1989,6 +1982,7 @@ fn seturgent(c: &mut Client, urg: bool, globals: &Globals) {
 
     let f = unsafe { &*wmh }.flags;
     unsafe { &mut *wmh }.flags = if urg { f | X_URGENCY_HINT } else { f & !X_URGENCY_HINT };
+    unsafe { XSetWMHints(globals.dpy.as_ptr(), c.win, wmh) };
     unsafe { XFree(wmh.cast()) };
 }
 
@@ -2192,7 +2186,7 @@ fn unfocus(c: Option<NonNull<Client>>, setfocus: bool, globals: &mut Globals) {
 }
 
 fn focus(mut c: Option<NonNull<Client>>, globals: &mut Globals) {
-    if c.is_none() || !is_visible(c.expect("already checked if none")) {
+    if !c.is_some_and(|c| is_visible(c)) {
         c = unsafe { globals.selmon.as_ref() }.stack;
         while let Some(c_inner) = c
             && !is_visible(c_inner)
@@ -2282,24 +2276,23 @@ fn getstate(w: Window, globals: &Globals) -> i64 {
 }
 
 fn updatetitle(c: &mut Client, globals: &Globals) {
-    let c_ref = c;
     if !gettextprop(
-        c_ref.win,
+        c.win,
         globals.netatom[NetAtom::WMName as usize],
-        c_ref.name.as_mut_ptr(),
-        c_ref.name.len() as u32,
+        c.name.as_mut_ptr(),
+        c.name.len() as u32,
         globals,
     ) {
         gettextprop(
-            c_ref.win,
+            c.win,
             XA_WM_NAME,
-            c_ref.name.as_mut_ptr(),
-            c_ref.name.len() as u32,
+            c.name.as_mut_ptr(),
+            c.name.len() as u32,
             globals,
         );
     }
-    if c_ref.name[0] == b'\0' as i8 {
-        unsafe { libc::strcpy(c_ref.name.as_mut_ptr(), BROKEN.as_ptr()) };
+    if c.name[0] == b'\0' as i8 {
+        unsafe { libc::strcpy(c.name.as_mut_ptr(), BROKEN.as_ptr()) };
     }
 }
 
@@ -2308,10 +2301,9 @@ fn applyrules(c: &mut Client, globals: &Globals) {
         res_name: core::ptr::null_mut(),
         res_class: core::ptr::null_mut(),
     };
-    let c_ref = c;
-    c_ref.isfloating = false;
-    c_ref.tags = 0;
-    unsafe { XGetClassHint(globals.dpy.as_ptr(), c_ref.win, &mut ch) };
+    c.isfloating = false;
+    c.tags = 0;
+    unsafe { XGetClassHint(globals.dpy.as_ptr(), c.win, &mut ch) };
     let class = if !ch.res_class.is_null() {
         ch.res_class
     } else {
@@ -2327,7 +2319,7 @@ fn applyrules(c: &mut Client, globals: &Globals) {
         let r_title = if !r.title.is_empty() {
             !unsafe {
                 libc::strstr(
-                    c_ref.name.as_ptr(),
+                    c.name.as_ptr(),
                     CString::new(r.title).expect("valid CString").as_ptr(),
                 )
                 .is_null()
@@ -2358,8 +2350,8 @@ fn applyrules(c: &mut Client, globals: &Globals) {
             true
         };
         if r_title && r_class && r_instance {
-            c_ref.isfloating = r.isfloating;
-            c_ref.tags |= r.tags;
+            c.isfloating = r.isfloating;
+            c.tags |= r.tags;
             let mut m = Some(globals.mons);
             while let Some(m_inner) = m
                 && unsafe { m_inner.as_ref().num } != r.monitor
@@ -2367,7 +2359,7 @@ fn applyrules(c: &mut Client, globals: &Globals) {
                 m = unsafe { m_inner.as_ref() }.next;
             }
             if let Some(m) = m {
-                c_ref.mon = m;
+                c.mon = m;
             }
         }
     }
@@ -2379,10 +2371,10 @@ fn applyrules(c: &mut Client, globals: &Globals) {
         unsafe { XFree(ch.res_name.cast_mut().cast()) };
     }
 
-    c_ref.tags = if c_ref.tags & TAGMASK != 0 {
-        c_ref.tags & TAGMASK
+    c.tags = if c.tags & TAGMASK != 0 {
+        c.tags & TAGMASK
     } else {
-        (unsafe { c_ref.mon.as_ref().tagset })[unsafe { c_ref.mon.as_ref().seltags } as usize]
+        (unsafe { c.mon.as_ref().tagset })[unsafe { c.mon.as_ref().seltags } as usize]
     };
 }
 
@@ -2552,26 +2544,25 @@ fn applysizehints(
 
 fn configure(c: &Client, globals: &Globals) {
     const CONFIGURE_NOTIFY: i32 = 22;
-    let c_ref = c;
     let mut ce = XConfigureEvent {
         r#type: CONFIGURE_NOTIFY,
         serial: 0,
         send_event: 0,
         display: globals.dpy.as_ptr(),
-        event: c_ref.win,
-        window: c_ref.win,
-        x: c_ref.x,
-        y: c_ref.y,
-        width: c_ref.w,
-        height: c_ref.h,
-        border_width: c_ref.bw,
+        event: c.win,
+        window: c.win,
+        x: c.x,
+        y: c.y,
+        width: c.w,
+        height: c.h,
+        border_width: c.bw,
         above: 0,
         override_redirect: 0,
     };
     unsafe {
         XSendEvent(
             globals.dpy.as_ptr(),
-            c_ref.win,
+            c.win,
             0,
             STRUCTURE_NOTIFY_MASK,
             (&mut ce) as *mut _ as *mut XEvent,
@@ -2603,7 +2594,8 @@ fn getatomprop(c: &Client, prop: Atom, globals: &Globals) -> Atom {
             &mut dl,
             &mut p,
         )
-    } != 0
+    } == 0
+        && !p.is_null()
     {
         if nitems > 0 && format == 32 {
             atom = unsafe { *p.cast::<u64>() }
@@ -3311,7 +3303,7 @@ fn cleanup(mut globals: Globals) -> *mut Display {
 
     //cleanup monitors
     unsafe { XUngrabKey(globals.dpy.as_ptr(), ANY_KEY, ANY_MODIFIER, globals.root) };
-    globals.selmon = NonNull::dangling(); // clear the selmon field to that there are no more dangling pointers
+    globals.selmon = NonNull::dangling(); // prevent use-after-free: monitors are freed next
     while !cleanupmon(globals.mons, &mut globals) {}
 
     let Globals {
