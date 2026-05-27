@@ -21,6 +21,7 @@ const VERSION: &str = "0.0.1";
 const TAGMASK: u32 = (1 << config::TAGS.len() as u32) - 1;
 const BUTTON_MASK: i64 = BUTTON_PRESS_MASK | BUTTON_RELEASE_MASK;
 const MOUSE_MASK: i64 = BUTTON_MASK | POINTER_MOTION_MASK;
+
 enum CursorState {
     Normal = 0,
     Resize,
@@ -207,7 +208,7 @@ type HandlerFunction = fn(&mut XEvent, &mut Globals);
 
 static mut XERRORXLIB: extern "C" fn(*mut Display, *mut XErrorEvent) -> i32 = xerrorstart;
 const BROKEN: &CStr = c"broken";
-const HANDLER: [Option<HandlerFunction>; LAST_EVENT] = [
+const HANDLER: [Option<HandlerFunction>; LAST_EVENT as usize] = [
     None,                   // None
     None,                   // None
     Some(keypress),         // KeyPress
@@ -751,7 +752,7 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
                 &mut ev,
             )
         };
-        match unsafe { ev.r#type } as usize {
+        match unsafe { ev.r#type } {
             CONFIGURE_REQUEST | EXPOSE | MAP_REQUEST => {
                 (HANDLER[unsafe { ev.r#type } as usize].expect("valid function"))(&mut ev, globals);
             }
@@ -888,7 +889,7 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
                 &mut ev,
             )
         };
-        match unsafe { ev.r#type } as usize {
+        match unsafe { ev.r#type } {
             CONFIGURE_REQUEST | EXPOSE | MAP_REQUEST => {
                 (HANDLER[unsafe { ev.r#type } as usize].expect("valid function"))(&mut ev, globals);
             }
@@ -1066,7 +1067,8 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
 
     if let Some(mut c) = wintoclient(ev.window, globals) {
         let c_ref = unsafe { c.as_mut() };
-        if ev.value_mask & CW_BORDER_WIDTH != 0 {
+        let vm = ev.value_mask as u32;
+        if vm & CW_BORDER_WIDTH != 0 {
             c_ref.bw = ev.border_width;
         } else if c_ref.isfloating
             || unsafe { globals.selmon.as_ref() }.lt
@@ -1075,19 +1077,19 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
                 .is_none()
         {
             let m = unsafe { c_ref.mon.as_ref() };
-            if ev.value_mask & CWX != 0 {
+            if vm & CWX != 0 {
                 c_ref.oldx = c_ref.x;
                 c_ref.x = m.mx + ev.x;
             }
-            if ev.value_mask & CWY != 0 {
+            if vm & CWY != 0 {
                 c_ref.oldy = c_ref.y;
                 c_ref.y = m.my + ev.y;
             }
-            if ev.value_mask & CW_WIDTH != 0 {
+            if vm & CW_WIDTH != 0 {
                 c_ref.oldw = c_ref.w;
                 c_ref.w = ev.width;
             }
-            if ev.value_mask & CW_HEIGHT != 0 {
+            if vm & CW_HEIGHT != 0 {
                 c_ref.oldh = c_ref.h;
                 c_ref.h = ev.height;
             }
@@ -1097,7 +1099,7 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
             if (c_ref.y + c_ref.h) > m.my + m.mh && c_ref.isfloating {
                 c_ref.y = m.my + (m.mh / 2 - c_ref.height() / 2); /* center in y direction */
             }
-            if (ev.value_mask & (CWX | CWY)) != 0 && !(ev.value_mask & (CW_WIDTH | CW_HEIGHT)) != 0
+            if (vm & (CWX | CWY)) != 0 && !(vm & (CW_WIDTH | CW_HEIGHT)) != 0
             {
                 configure(c, globals);
             }
@@ -1126,7 +1128,7 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
             sibling: ev.above,
             stack_mode: ev.detail,
         };
-        unsafe { XConfigureWindow(globals.dpy.as_ptr(), ev.window, ev.value_mask, &mut wc) };
+        unsafe { XConfigureWindow(globals.dpy.as_ptr(), ev.window, ev.value_mask as u32, &mut wc) };
     }
     unsafe { XSync(globals.dpy.as_ptr(), 0) };
 }

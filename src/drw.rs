@@ -227,7 +227,7 @@ impl Drw {
                 self.dpy.as_ptr(),
                 default_visual(self.dpy.as_ptr(), self.screen),
                 default_colormap(self.dpy.as_ptr(), self.screen),
-                clrname.as_ptr().cast::<u8>(),
+                clrname.as_ptr(),
                 dest as *mut MaybeUninit<Clr> as *mut Clr,
             )
         } == 0
@@ -570,7 +570,7 @@ impl Drw {
                     )
                 };
                 unsafe { FcDefaultSubstitute(fcpattern) };
-                let mut res = 0;
+                let mut res = FcResult::Match;
                 match_ = NonNull::new(unsafe {
                     XftFontMatch(self.dpy.as_ptr(), self.screen, fcpattern, &mut res)
                 });

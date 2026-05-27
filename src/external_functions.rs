@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 
-use std::ffi::c_void;
+use std::ffi::{c_char, c_int, c_long, c_ulong, c_uint, c_void};
 
 #[link(name = "X11")]
 unsafe extern "C" {
     pub(crate) fn XCreateGC(
         display: *mut Display,
         d: Drawable,
-        valuemask: u64,
+        valuemask: c_ulong,
         values: *const (),
     ) -> GC;
 
@@ -32,7 +32,7 @@ unsafe extern "C" {
 
     pub(crate) fn XFreeGC(display: *mut Display, gc: GC) -> i32;
 
-    pub(crate) fn XSetForeground(display: *mut Display, gc: GC, foreground: u64) -> i32;
+    pub(crate) fn XSetForeground(display: *mut Display, gc: GC, foreground: c_ulong) -> c_int;
     pub(crate) fn XFillRectangle(
         display: *mut Display,
         d: Drawable,
@@ -73,11 +73,11 @@ unsafe extern "C" {
 
     pub(crate) fn XSupportsLocale() -> i32;
 
-    pub(crate) fn XOpenDisplay(display_name: *const u8) -> *mut Display;
+    pub(crate) fn XOpenDisplay(display_name: *const c_char) -> *mut Display;
 
     pub(crate) fn XSetErrorHandler(handler: XErrorHandler) -> XErrorHandler;
 
-    pub(crate) fn XSelectInput(display: *mut Display, w: Window, event_mask: i64) -> i32;
+    pub(crate) fn XSelectInput(display: *mut Display, w: Window, event_mask: c_long) -> c_int;
 
     pub(crate) fn XQueryPointer(
         display: *mut Display,
@@ -108,7 +108,7 @@ unsafe extern "C" {
         depth: i32,
         class: u32,
         visual: *mut Visual,
-        value_mask: u64,
+        value_mask: c_ulong,
         attributes: *mut XSetWindowAttributes,
     ) -> Window;
 
@@ -144,9 +144,9 @@ unsafe extern "C" {
         y: i32,
         width: u32,
         height: u32,
-        border_width: u32,
-        border: u64,
-        background: u64,
+        border_width: c_uint,
+        border: c_ulong,
+        background: c_ulong,
     ) -> Window;
 
     pub(crate) fn XChangeProperty(
@@ -165,9 +165,9 @@ unsafe extern "C" {
     pub(crate) fn XChangeWindowAttributes(
         display: *mut Display,
         w: Window,
-        value_mask: u64,
+        value_mask: c_ulong,
         attributes: *mut XSetWindowAttributes,
-    ) -> i32;
+    ) -> c_int;
 
     pub(crate) fn XGetModifierMapping(display: *mut Display) -> *mut XModifierKeymap;
 
@@ -224,7 +224,7 @@ unsafe extern "C" {
         cursor: Cursor,
     ) -> i32;
 
-    pub(crate) fn XSetWindowBorder(display: *mut Display, w: Window, border_pixel: u64) -> i32;
+    pub(crate) fn XSetWindowBorder(display: *mut Display, w: Window, border_pixel: c_ulong) -> c_int;
     pub(crate) fn XSetInputFocus(
         display: *mut Display,
         focus: Window,
@@ -242,8 +242,8 @@ unsafe extern "C" {
     pub(crate) fn XSendEvent(
         display: *mut Display,
         w: Window,
-        propogate: i32,
-        event_mask: i64,
+        propogate: c_int,
+        event_mask: c_long,
         event_send: *mut XEvent,
     ) -> Status;
 
@@ -272,16 +272,16 @@ unsafe extern "C" {
         display: *mut Display,
         w: Window,
         property: Atom,
-        long_offset: i64,
-        long_length: i64,
-        delete: i32,
+        long_offset: c_long,
+        long_length: c_long,
+        delete: c_int,
         req_type: Atom,
         actual_type_return: *mut Atom,
-        actual_format_return: *mut i32,
-        nitems_return: *mut u64,
-        bytes_after_return: *mut u64,
+        actual_format_return: *mut c_int,
+        nitems_return: *mut c_ulong,
+        bytes_after_return: *mut c_ulong,
         prop_return: *mut *mut u8,
-    ) -> i32;
+    ) -> c_int;
 
     pub(crate) fn XGetClassHint(
         display: *mut Display,
@@ -300,9 +300,9 @@ unsafe extern "C" {
 
     pub(crate) fn XCheckMaskEvent(
         display: *mut Display,
-        event_mask: i64,
+        event_mask: c_long,
         event_return: *mut XEvent,
-    ) -> i32;
+    ) -> c_int;
 
     pub(crate) fn XMoveWindow(display: *mut Display, w: Window, x: i32, y: i32) -> i32;
 
@@ -310,7 +310,7 @@ unsafe extern "C" {
         display: *mut Display,
         w: Window,
         hints_return: *mut XSizeHints,
-        supplied_return: *mut i64,
+        supplied_return: *mut c_long,
     ) -> Status;
 
     pub(crate) fn XSetWMHints(display: *mut Display, w: Window, wm_hints: *mut XWMHints) -> i32;
@@ -347,9 +347,9 @@ unsafe extern "C" {
 
     pub(crate) fn XMaskEvent(
         display: *mut Display,
-        event_mask: i64,
+        event_mask: c_long,
         event_return: *mut XEvent,
-    ) -> i32;
+    ) -> c_int;
 
     pub(crate) fn XUngrabPointer(display: *mut Display, time: Time) -> i32;
     pub(crate) fn XWarpPointer(
@@ -363,6 +363,12 @@ unsafe extern "C" {
         dest_x: i32,
         dest_y: i32,
     ) -> i32;
+
+    pub(crate) fn XGetWMHints(display: *mut Display, w: Window) -> *mut XWMHints;
+    pub(crate) fn XGrabServer(display: *mut Display) -> c_int;
+    pub(crate) fn XUngrabServer(display: *mut Display) -> c_int;
+    pub(crate) fn XDestroyWindow(display: *mut Display, w: Window) -> c_int;
+    pub(crate) fn XUnmapWindow(display: *mut Display, w: Window) -> c_int;
 }
 
 #[link(name = "Xinerama")]
@@ -373,34 +379,34 @@ unsafe extern "C" {
     pub(crate) fn FcNameParse(name: *const FcChar8) -> *mut FcPattern;
     pub(crate) fn FcPatternDestroy(p: *mut FcPattern);
     pub(crate) fn FcCharSetCreate() -> *mut FcCharSet;
-    pub(crate) fn FcCharSetAddChar(fcs: *mut FcCharSet, usc4: FcChar32) -> i32;
+    pub(crate) fn FcCharSetAddChar(fcs: *mut FcCharSet, usc4: FcChar32) -> c_int;
     pub(crate) fn FcPatternDuplicate(p: *const FcPattern) -> *mut FcPattern;
     pub(crate) fn FcPatternAddCharSet(
         p: *mut FcPattern,
-        object: *const i8,
+        object: *const c_char,
         c: *const FcCharSet,
-    ) -> i32;
-    pub(crate) fn FcPatternAddBool(p: *mut FcPattern, object: *const i8, b: i32) -> i32;
+    ) -> c_int;
+    pub(crate) fn FcPatternAddBool(p: *mut FcPattern, object: *const c_char, b: c_int) -> c_int;
     pub(crate) fn FcConfigSubstitute(
         config: *mut FcConfig,
         p: *mut FcPattern,
         kind: FcMatchKind,
-    ) -> i32;
+    ) -> c_int;
     pub(crate) fn FcDefaultSubstitute(pattern: *mut FcPattern);
     pub(crate) fn FcCharSetDestroy(fcs: *mut FcCharSet);
 }
 
 #[link(name = "Xft")]
 unsafe extern "C" {
-    pub(crate) fn XftFontOpenName(dpy: *mut Display, screen: i32, name: *const i8) -> *mut XftFont;
+    pub(crate) fn XftFontOpenName(dpy: *mut Display, screen: c_int, name: *const c_char) -> *mut XftFont;
     pub(crate) fn XftFontOpenPattern(dpy: *mut Display, pattern: *mut FcPattern) -> *mut XftFont;
     pub(crate) fn XftColorAllocName(
         dpy: *mut Display,
         visual: *const Visual,
         cmap: Colormap,
-        name: *const u8,
+        name: *const c_char,
         result: *mut XftColor,
-    ) -> i32;
+    ) -> c_int;
     pub(crate) fn XftColorFree(
         dpy: *mut Display,
         visual: *mut Visual,
@@ -415,20 +421,20 @@ unsafe extern "C" {
         colormap: Colormap,
     ) -> *mut XftDraw;
 
-    pub(crate) fn XftCharExists(dpy: *mut Display, font: *mut XftFont, usc4: FcChar32) -> i32;
+    pub(crate) fn XftCharExists(dpy: *mut Display, font: *mut XftFont, usc4: FcChar32) -> c_int;
 
     pub(crate) fn XftTextExtentsUtf8(
         dpy: *mut Display,
         font: *mut XftFont,
         string: *const FcChar8,
-        len: i32,
+        len: c_int,
         extents: *mut XGlyphInfo,
     );
     pub(crate) fn XftFontMatch(
         dpy: *mut Display,
-        screen: i32,
+        screen: c_int,
         pattern: *const FcPattern,
-        result: *mut i32,
+        result: *mut FcResult,
     ) -> *mut FcPattern;
 
     pub(crate) fn XftDrawDestroy(draw: *mut XftDraw);
@@ -437,32 +443,26 @@ unsafe extern "C" {
         draw: *mut XftDraw,
         color: *const XftColor,
         r#pub: *mut XftFont,
-        x: i32,
-        y: i32,
+        x: c_int,
+        y: c_int,
         string: *const FcChar8,
-        len: i32,
+        len: c_int,
     );
-
-    pub(crate) fn XGetWMHints(display: *mut Display, w: Window) -> *mut XWMHints;
-    pub(crate) fn XGrabServer(display: *mut Display) -> i32;
-    pub(crate) fn XUngrabServer(display: *mut Display) -> i32;
-    pub(crate) fn XDestroyWindow(display: *mut Display, w: Window) -> i32;
-    pub(crate) fn XUnmapWindow(display: *mut Display, w: Window) -> i32;
 }
 
 pub(crate) type FcChar8 = u8;
 pub(crate) type FcChar32 = u32;
 
 #[allow(clippy::upper_case_acronyms)]
-pub(crate) type XID = u64;
+pub(crate) type XID = c_ulong;
 pub(crate) type Cursor = XID;
 pub(crate) type Drawable = XID;
 pub(crate) type Window = XID;
 pub(crate) type Pixmap = XID;
 pub(crate) type Colormap = XID;
 pub(crate) type KeySym = XID;
-pub(crate) type Status = i32;
-pub(crate) type Time = u64;
+pub(crate) type Status = c_int;
+pub(crate) type Time = c_ulong;
 
 pub(crate) type Display = _XDisplay;
 pub(crate) enum _XDisplay {}
@@ -489,7 +489,7 @@ pub(crate) enum _FcConfig {}
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct XftColor {
-    pub(crate) pixel: u64,
+    pub(crate) pixel: c_ulong,
     pub(crate) color: XRenderColor,
 }
 
@@ -519,7 +519,7 @@ struct _XPrivDisplay {
     pub(crate) private2: i32,
     pub(crate) proto_major_version: i32, /* major version of server's X protocol */
     pub(crate) proto_minor_version: i32, /* minor version of servers X protocol */
-    pub(crate) vendor: *mut u8,          /* vendor of the server hardware */
+    pub(crate) vendor: *mut c_char,       /* vendor of the server hardware */
     pub(crate) private3: XID,
     pub(crate) private4: XID,
     pub(crate) private5: XID,
@@ -536,8 +536,8 @@ struct _XPrivDisplay {
     pub(crate) private9: *mut _XPrivate,
     pub(crate) private10: *mut _XPrivate,
     pub(crate) qlen: i32,              /* Length of input event queue */
-    pub(crate) last_request_read: u64, /* seq number of last event read */
-    pub(crate) request: u64,           /* sequence number of last request. */
+    pub(crate) last_request_read: c_ulong, /* seq number of last event read */
+    pub(crate) request: c_ulong,           /* sequence number of last request. */
     pub(crate) private11: XPointer,
     pub(crate) private12: XPointer,
     pub(crate) private13: XPointer,
@@ -545,18 +545,18 @@ struct _XPrivDisplay {
     pub(crate) max_request_size: u32, /* maximum number 32 bit words in request*/
     pub(crate) db: *mut _XrmHashBucketRec,
     pub(crate) private15: fn(display: *mut _XDisplay) -> i32,
-    pub(crate) display_name: *mut u8, /* "host:display" string used on this connect*/
+    pub(crate) display_name: *mut c_char, /* "host:display" string used on this connect*/
     pub(crate) default_screen: i32,   /* default screen for operations */
     pub(crate) nscreens: i32,         /* number of screens on this server*/
     pub(crate) screens: *mut Screen,  /* pointer to list of screens */
-    pub(crate) motion_buffer: u64,    /* size of motion buffer */
-    pub(crate) private16: u64,
+    pub(crate) motion_buffer: c_ulong, /* size of motion buffer */
+    pub(crate) private16: c_ulong,
     pub(crate) min_keycode: i32, /* minimum defined keycode */
     pub(crate) max_keycode: i32, /* maximum defined keycode */
     pub(crate) private17: XPointer,
     pub(crate) private18: XPointer,
     pub(crate) private19: i32,
-    pub(crate) xdefaults: *mut u8, /* contents of defaults from server */
+    pub(crate) xdefaults: *mut c_char, /* contents of defaults from server */
 }
 
 #[repr(C)]
@@ -592,7 +592,7 @@ pub(crate) union XEvent {
     pub(crate) xmotion: XMotionEvent,
     pub(crate) xunmap: XUnmapEvent,
     pub(crate) xproperty: XPropertyEvent,
-    pad: [i64; 24],
+    pad: [c_long; 24],
 }
 
 #[repr(C)]
@@ -613,14 +613,14 @@ pub(crate) struct XClientMessageEvent {
 pub(crate) union XClientMessageEventData {
     pub(crate) b: [i8; 20],
     pub(crate) s: [i16; 10],
-    pub(crate) l: [i64; 5],
+    pub(crate) l: [c_long; 5],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct XButtonEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: u64,           /* # of last request processed by server */
+    pub(crate) serial: c_ulong,        /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* "event" window it is reported relative to */
@@ -643,7 +643,7 @@ pub(crate) type XButtonReleasedEvent = XButtonEvent;
 #[derive(Clone, Copy)]
 pub(crate) struct XConfigureRequestEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,     /* # of last request processed by server */
+    pub(crate) serial: c_ulong, /* # of last request processed by server */
     pub(crate) send_event: i32, /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) parent: Window,
@@ -655,14 +655,14 @@ pub(crate) struct XConfigureRequestEvent {
     pub(crate) border_width: i32,
     pub(crate) above: Window,
     pub(crate) detail: i32, /* Above, Below, TopIf, BottomIf, Opposite */
-    pub(crate) value_mask: u32,
+    pub(crate) value_mask: c_ulong,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct XDestroyWindowEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,     /* # of last request processed by server */
+    pub(crate) serial: c_ulong, /* # of last request processed by server */
     pub(crate) send_event: i32, /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) event: Window,
@@ -673,7 +673,7 @@ pub(crate) struct XDestroyWindowEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XCrossingEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: u64,           /* # of last request processed by server */
+    pub(crate) serial: c_ulong,        /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* "event" window reported relative to */
@@ -700,7 +700,7 @@ type XLeaveWindowEvent = XCrossingEvent;
 #[derive(Clone, Copy)]
 pub(crate) struct XExposeEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,     /* # of last request processed by server */
+    pub(crate) serial: c_ulong, /* # of last request processed by server */
     pub(crate) send_event: i32, /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,
@@ -715,7 +715,7 @@ pub(crate) struct XExposeEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XFocusChangeEvent {
     pub(crate) r#type: i32,           /* FocusIn or FocusOut */
-    pub(crate) serial: u64,           /* # of last request processed by server */
+    pub(crate) serial: c_ulong,        /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* window of event */
@@ -734,7 +734,7 @@ type XFocusOutEvent = XFocusChangeEvent;
 #[derive(Clone, Copy)]
 pub(crate) struct XKeyEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: u64,           /* # of last request processed by server */
+    pub(crate) serial: c_ulong,        /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* "event" window it is reported relative to */
@@ -757,7 +757,7 @@ type XKeyReleasedEvent = XKeyEvent;
 #[derive(Clone, Copy)]
 pub(crate) struct XMappingEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: u64,           /* # of last request processed by server */
+    pub(crate) serial: c_ulong,        /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* unused */
@@ -771,7 +771,7 @@ pub(crate) struct XMappingEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XMapRequestEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,     /* # of last request processed by server */
+    pub(crate) serial: c_ulong, /* # of last request processed by server */
     pub(crate) send_event: i32, /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) parent: Window,
@@ -782,7 +782,7 @@ pub(crate) struct XMapRequestEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XMotionEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,     /* # of last request processed by server */
+    pub(crate) serial: c_ulong, /* # of last request processed by server */
     pub(crate) send_event: i32, /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,
@@ -802,7 +802,7 @@ pub(crate) struct XMotionEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XUnmapEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,     /* # of last request processed by server */
+    pub(crate) serial: c_ulong, /* # of last request processed by server */
     pub(crate) send_event: i32, /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) event: Window,
@@ -814,7 +814,7 @@ pub(crate) struct XUnmapEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XPropertyEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,     /* # of last request processed by server */
+    pub(crate) serial: c_ulong, /* # of last request processed by server */
     pub(crate) send_event: i32, /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,
@@ -834,8 +834,8 @@ pub(crate) struct XWindowChanges {
     pub(crate) stack_mode: i32,
 }
 
-pub(crate) type XPointer = *mut u8;
-pub(crate) type Atom = u64;
+pub(crate) type XPointer = *mut c_char;
+pub(crate) type Atom = c_ulong;
 
 #[repr(C)]
 struct ScreenFormat {
@@ -848,7 +848,7 @@ struct ScreenFormat {
 #[repr(C)]
 pub(crate) struct Screen {
     pub(crate) ext_data: *mut XExtData, /* hook for extension to hang data */
-    pub(crate) display: *mut _XDisplay, /* back pointer to display structure */
+    pub(crate) display: *mut Display,   /* back pointer to display structure */
     pub(crate) root: Window,            /* Root window id. */
     pub(crate) width: i32,              /* width and height of screen */
     pub(crate) height: i32,
@@ -860,13 +860,13 @@ pub(crate) struct Screen {
     pub(crate) root_visual: *mut Visual, /* root visual */
     pub(crate) default_gc: GC,           /* GC for the root root visual */
     pub(crate) cmap: Colormap,           /* default color map */
-    pub(crate) white_pixel: u64,
-    pub(crate) black_pixel: u64, /* White and Black pixel values */
+    pub(crate) white_pixel: c_ulong,
+    pub(crate) black_pixel: c_ulong, /* White and Black pixel values */
     pub(crate) max_maps: i32,    /* max and min color maps */
     pub(crate) min_maps: i32,
     pub(crate) backing_store: i32, /* Never, WhenMapped, Always */
     pub(crate) save_unders: i32,
-    pub(crate) root_input_mask: i64, /* initial root input mask */
+    pub(crate) root_input_mask: c_long, /* initial root input mask */
 }
 
 /*
@@ -887,14 +887,14 @@ pub(crate) struct Visual {
     ext_data: *mut XExtData, /* hook for extension to hang data */
     visualid: VisualID,      /* visual id of this visual */
     class: i32,              /* class of screen (monochrome, etc.) */
-    red_mask: u64,           /* mask values */
-    green_mask: u64,
-    blue_mask: u64,
+    red_mask: c_ulong,   /* mask values */
+    green_mask: c_ulong,
+    blue_mask: c_ulong,
     bits_per_rgb: i32, /* log base 2 of distinct color values */
     map_entries: i32,  /* color map entries */
 }
 
-type VisualID = u64;
+type VisualID = c_ulong;
 
 pub(crate) unsafe fn screen_of_display(dpy: *mut Display, src: i32) -> *mut Screen {
     assert!(src >= 0, "src cannot be negative");
@@ -910,7 +910,7 @@ pub(crate) unsafe fn default_visual(dpy: *mut Display, src: i32) -> *mut Visual 
     (unsafe { &*screen_of_display(dpy, src) }).root_visual
 }
 
-pub(crate) unsafe fn default_colormap(dpy: *mut Display, src: i32) -> u64 {
+pub(crate) unsafe fn default_colormap(dpy: *mut Display, src: i32) -> Colormap {
     (unsafe { &*screen_of_display(dpy, src) }).cmap
 }
 
@@ -922,7 +922,7 @@ pub(crate) unsafe fn default_height(dpy: *mut Display, src: i32) -> i32 {
     (unsafe { &*screen_of_display(dpy, src) }).height
 }
 
-pub(crate) unsafe fn root_window(dpy: *mut Display, src: i32) -> u64 {
+pub(crate) unsafe fn root_window(dpy: *mut Display, src: i32) -> Window {
     (unsafe { &*screen_of_display(dpy, src) }).root
 }
 
@@ -931,7 +931,7 @@ pub(crate) unsafe fn default_screen(dpy: *mut Display) -> i32 {
     { unsafe { &*priv_dpy } }.default_screen
 }
 
-pub(crate) unsafe fn default_root_window(dpy: *mut Display) -> u64 {
+pub(crate) unsafe fn default_root_window(dpy: *mut Display) -> Window {
     (unsafe { &*screen_of_display(dpy, default_screen(dpy)) }).root
 }
 
@@ -983,7 +983,7 @@ pub(crate) struct XErrorEvent {
     r#type: i32,
     display: *mut Display,       /* Display the event was read from */
     resourceid: XID,             /* resource id */
-    serial: u64,                 /* serial number of failed request */
+    serial: c_ulong,             /* serial number of failed request */
     pub(crate) error_code: u8,   /* error code of failed request */
     pub(crate) request_code: u8, /* Major op-code of failed request */
     minor_code: u8,              /* Minor op-code of failed request */
@@ -994,7 +994,7 @@ pub(crate) struct XTextProperty {
     pub(crate) value: *mut u8,
     pub(crate) encoding: Atom,
     pub(crate) format: i32,
-    pub(crate) nitems: u64,
+    pub(crate) nitems: c_ulong,
 }
 
 pub(crate) type XErrorHandler =
@@ -1004,17 +1004,17 @@ pub(crate) type XErrorHandler =
 #[derive(Debug)]
 pub(crate) struct XSetWindowAttributes {
     pub(crate) background_pixmap: Pixmap, /* background or None or ParentRelative */
-    pub(crate) background_pixel: u64,     /* background pixel */
-    pub(crate) border_pixmap: Pixmap,     /* border of the window */
-    pub(crate) border_pixel: u64,         /* border pixel value */
-    pub(crate) bit_gravity: i32,          /* one of bit gravity values */
-    pub(crate) win_gravity: i32,          /* one of the window gravity values */
-    pub(crate) backing_store: i32,        /* NotUseful, WhenMapped, Always */
-    pub(crate) backing_planes: u64,       /* planes to be preserved if possible */
-    pub(crate) backing_pixel: u64,        /* value to use in restoring planes */
-    pub(crate) save_under: i32,           /* should bits under be saved? (popups) */
-    pub(crate) event_mask: i64,           /* set of events that should be saved */
-    pub(crate) do_not_propogate_mask: i64, /* set of events that should not propagate */
+    pub(crate) background_pixel: c_ulong,  /* background pixel */
+    pub(crate) border_pixmap: Pixmap,      /* border of the window */
+    pub(crate) border_pixel: c_ulong,      /* border pixel value */
+    pub(crate) bit_gravity: i32,           /* one of bit gravity values */
+    pub(crate) win_gravity: i32,           /* one of the window gravity values */
+    pub(crate) backing_store: i32,         /* NotUseful, WhenMapped, Always */
+    pub(crate) backing_planes: c_ulong,    /* planes to be preserved if possible */
+    pub(crate) backing_pixel: c_ulong,     /* value to use in restoring planes */
+    pub(crate) save_under: i32,            /* should bits under be saved? (popups) */
+    pub(crate) event_mask: c_long,         /* set of events that should be saved */
+    pub(crate) do_not_propogate_mask: c_long, /* set of events that should not propagate */
     pub(crate) override_redirect: i32,    /* boolean value for override-redirect */
     pub(crate) colormap: Colormap,        /* color map to be associated with window */
     pub(crate) cursor: Cursor,            /* cursor to be displayed (or None) */
@@ -1022,14 +1022,14 @@ pub(crate) struct XSetWindowAttributes {
 
 #[repr(C)]
 pub(crate) struct XClassHint {
-    pub(crate) res_name: *const i8,
-    pub(crate) res_class: *const i8,
+    pub(crate) res_name: *const c_char,
+    pub(crate) res_class: *const c_char,
 }
 
 #[repr(C)]
 pub(crate) struct XWMHints {
-    pub(crate) flags: i64, /* marks which fields in this structure are defined */
-    pub(crate) input: i32, /* does this application rely on the window manager to get keyboard input? */
+    pub(crate) flags: c_long, /* marks which fields in this structure are defined */
+    pub(crate) input: i32,   /* does this application rely on the window manager to get keyboard input? */
     pub(crate) initial_state: i32, /* see below */
     pub(crate) icon_pixmap: Pixmap, /* pixmap to be used as icon */
     pub(crate) icon_window: Window, /* window to be used as icon */
@@ -1051,18 +1051,18 @@ pub(crate) struct XWindowAttributes {
     pub(crate) visual: *mut Visual,        /* the associated visual structure */
     pub(crate) root: Window,               /* root of screen containing window */
     pub(crate) class: i32,                 /* InputOutput, InputOnly*/
-    pub(crate) bin_gravity: i32,           /* one of bit gravity values */
-    pub(crate) win_gravity: i32,           /* one of the window gravity values */
-    pub(crate) backing_store: i32,         /* NotUseful, WhenMapped, Always */
-    pub(crate) backing_planes: u32,        /* planes to be preserved if possible */
-    pub(crate) backing_pixel: u32,         /* value to be used when restoring planes */
-    pub(crate) save_under: i32,            /* boolean, should bits under be saved? */
-    pub(crate) colormap: Colormap,         /* color map to be associated with window */
-    pub(crate) map_installed: i32,         /* boolean, is color map currently installed*/
-    pub(crate) map_state: i32,             /* IsUnmapped, IsUnviewable, IsViewable */
-    pub(crate) all_event_mask: i64,        /* set of events all people have interest in*/
-    pub(crate) your_event_mask: i64,       /* my event mask */
-    pub(crate) do_not_propogate_mask: i64, /* set of events that should not propagate */
+    pub(crate) bit_gravity: i32,              /* one of bit gravity values */
+    pub(crate) win_gravity: i32,             /* one of the window gravity values */
+    pub(crate) backing_store: i32,           /* NotUseful, WhenMapped, Always */
+    pub(crate) backing_planes: c_ulong,      /* planes to be preserved if possible */
+    pub(crate) backing_pixel: c_ulong,       /* value to be used when restoring planes */
+    pub(crate) save_under: i32,              /* boolean, should bits under be saved? */
+    pub(crate) colormap: Colormap,           /* color map to be associated with window */
+    pub(crate) map_installed: i32,           /* boolean, is color map currently installed*/
+    pub(crate) map_state: i32,               /* IsUnmapped, IsUnviewable, IsViewable */
+    pub(crate) all_event_mask: c_long,       /* set of events all people have interest in*/
+    pub(crate) your_event_mask: c_long,      /* my event mask */
+    pub(crate) do_not_propogate_mask: c_long, /* set of events that should not propagate */
     pub(crate) override_redirect: i32,     /* boolean value for override-redirect */
     pub(crate) screen: *mut Screen,        /* back pointer to correct screen */
 }
@@ -1071,7 +1071,7 @@ pub(crate) struct XWindowAttributes {
 #[derive(Clone, Copy)]
 pub(crate) struct XConfigureEvent {
     pub(crate) r#type: i32,
-    pub(crate) serial: u64,
+    pub(crate) serial: c_ulong,
     pub(crate) send_event: i32,
     pub(crate) display: *mut Display,
     pub(crate) event: Window,
@@ -1087,8 +1087,8 @@ pub(crate) struct XConfigureEvent {
 
 #[repr(C)]
 pub(crate) struct XSizeHints {
-    pub(crate) flags: i64, /* marks which fields in this structure are defined */
-    pub(crate) x: i32,     /* obsolete for new window mgrs, but clients */
+    pub(crate) flags: c_long, /* marks which fields in this structure are defined */
+    pub(crate) x: i32,        /* obsolete for new window mgrs, but clients */
     pub(crate) y: i32,
     pub(crate) width: i32, /* should set so old wm's don't mess up */
     pub(crate) height: i32,
@@ -1112,94 +1112,94 @@ pub(crate) struct XSizeHintsAspect {
 }
 
 pub(crate) const REVERT_TO_POINTER_ROOT: i32 = 1;
-pub(crate) const CURRENT_TIME: u64 = 0;
+pub(crate) const CURRENT_TIME: Time = 0;
 
 // X RESERVED RESOURCE AND CONSTANT DEFINITIONS
-pub(crate) const PARENT_RELATIVE: u64 = 1;
-pub(crate) const COPY_FROM_PARENT: u64 = 0;
+pub(crate) const PARENT_RELATIVE: c_ulong = 1;
+pub(crate) const COPY_FROM_PARENT: c_ulong = 0;
 
 // Window Attributes for create window
-pub(crate) const CW_BACK_PIXMAP: u64 = 1 << 0;
-pub(crate) const CW_BACK_PIXEL: u64 = 1 << 1;
-pub(crate) const CW_BORDER_PIXMAP: u64 = 1 << 2;
-pub(crate) const CW_BORDER_PIXEL: u64 = 1 << 3;
-pub(crate) const CW_BIT_GRAVITY: u64 = 1 << 4;
-pub(crate) const CW_WIN_GRAVITY: u64 = 1 << 5;
-pub(crate) const CW_BACKING_STORE: u64 = 1 << 6;
-pub(crate) const CW_BACKING_PLANES: u64 = 1 << 7;
-pub(crate) const CW_BACKING_PIXEL: u64 = 1 << 8;
-pub(crate) const CW_OVERRIDE_REDIRECT: u64 = 1 << 9;
-pub(crate) const CW_SAVE_UNDER: u64 = 1 << 10;
-pub(crate) const CW_EVENT_MASK: u64 = 1 << 11;
-pub(crate) const CW_DONT_PROPAGATE: u64 = 1 << 12;
-pub(crate) const CW_COLORMAP: u64 = 1 << 13;
-pub(crate) const CW_CURSOR: u64 = 1 << 14;
+pub(crate) const CW_BACK_PIXMAP: c_ulong = 1 << 0;
+pub(crate) const CW_BACK_PIXEL: c_ulong = 1 << 1;
+pub(crate) const CW_BORDER_PIXMAP: c_ulong = 1 << 2;
+pub(crate) const CW_BORDER_PIXEL: c_ulong = 1 << 3;
+pub(crate) const CW_BIT_GRAVITY: c_ulong = 1 << 4;
+pub(crate) const CW_WIN_GRAVITY: c_ulong = 1 << 5;
+pub(crate) const CW_BACKING_STORE: c_ulong = 1 << 6;
+pub(crate) const CW_BACKING_PLANES: c_ulong = 1 << 7;
+pub(crate) const CW_BACKING_PIXEL: c_ulong = 1 << 8;
+pub(crate) const CW_OVERRIDE_REDIRECT: c_ulong = 1 << 9;
+pub(crate) const CW_SAVE_UNDER: c_ulong = 1 << 10;
+pub(crate) const CW_EVENT_MASK: c_ulong = 1 << 11;
+pub(crate) const CW_DONT_PROPAGATE: c_ulong = 1 << 12;
+pub(crate) const CW_COLORMAP: c_ulong = 1 << 13;
+pub(crate) const CW_CURSOR: c_ulong = 1 << 14;
 
 //EVENT DEFINITIONS
-pub(crate) const NO_EVENT_MASK: i64 = 0;
-pub(crate) const KEY_PRESS_MASK: i64 = 1 << 0;
-pub(crate) const KEY_RELEASE_MASK: i64 = 1 << 1;
-pub(crate) const BUTTON_PRESS_MASK: i64 = 1 << 2;
-pub(crate) const BUTTON_RELEASE_MASK: i64 = 1 << 3;
-pub(crate) const ENTER_WINDOW_MASK: i64 = 1 << 4;
-pub(crate) const LEAVE_WINDOW_MASK: i64 = 1 << 5;
-pub(crate) const POINTER_MOTION_MASK: i64 = 1 << 6;
-pub(crate) const POINTER_MOTION_HINT_MASK: i64 = 1 << 7;
-pub(crate) const BUTTON1_MOTION_MASK: i64 = 1 << 8;
-pub(crate) const BUTTON2_MOTION_MASK: i64 = 1 << 9;
-pub(crate) const BUTTON3_MOTION_MASK: i64 = 1 << 10;
-pub(crate) const BUTTON4_MOTION_MASK: i64 = 1 << 11;
-pub(crate) const BUTTON5_MOTION_MASK: i64 = 1 << 12;
-pub(crate) const BUTTON_MOTION_MASK: i64 = 1 << 13;
-pub(crate) const KEYMAP_STATE_MASK: i64 = 1 << 14;
-pub(crate) const EXPOSURE_MASK: i64 = 1 << 15;
-pub(crate) const VISIBILITY_CHANGE_MASK: i64 = 1 << 16;
-pub(crate) const STRUCTURE_NOTIFY_MASK: i64 = 1 << 17;
-pub(crate) const RESIZE_REDIRECT_MASK: i64 = 1 << 18;
-pub(crate) const SUBSTRUCTURE_NOTIFY_MASK: i64 = 1 << 19;
-pub(crate) const SUBSTRUCTURE_REDIRECT_MASK: i64 = 1 << 20;
-pub(crate) const FOCUS_CHANGE_MASK: i64 = 1 << 21;
-pub(crate) const PROPERTY_CHANGE_MASK: i64 = 1 << 22;
-pub(crate) const COLORMAP_CHANGE_MASK: i64 = 1 << 23;
-pub(crate) const OWNER_GRAB_BUTTON_MASK: i64 = 1 << 24;
+pub(crate) const NO_EVENT_MASK: c_long = 0;
+pub(crate) const KEY_PRESS_MASK: c_long = 1 << 0;
+pub(crate) const KEY_RELEASE_MASK: c_long = 1 << 1;
+pub(crate) const BUTTON_PRESS_MASK: c_long = 1 << 2;
+pub(crate) const BUTTON_RELEASE_MASK: c_long = 1 << 3;
+pub(crate) const ENTER_WINDOW_MASK: c_long = 1 << 4;
+pub(crate) const LEAVE_WINDOW_MASK: c_long = 1 << 5;
+pub(crate) const POINTER_MOTION_MASK: c_long = 1 << 6;
+pub(crate) const POINTER_MOTION_HINT_MASK: c_long = 1 << 7;
+pub(crate) const BUTTON1_MOTION_MASK: c_long = 1 << 8;
+pub(crate) const BUTTON2_MOTION_MASK: c_long = 1 << 9;
+pub(crate) const BUTTON3_MOTION_MASK: c_long = 1 << 10;
+pub(crate) const BUTTON4_MOTION_MASK: c_long = 1 << 11;
+pub(crate) const BUTTON5_MOTION_MASK: c_long = 1 << 12;
+pub(crate) const BUTTON_MOTION_MASK: c_long = 1 << 13;
+pub(crate) const KEYMAP_STATE_MASK: c_long = 1 << 14;
+pub(crate) const EXPOSURE_MASK: c_long = 1 << 15;
+pub(crate) const VISIBILITY_CHANGE_MASK: c_long = 1 << 16;
+pub(crate) const STRUCTURE_NOTIFY_MASK: c_long = 1 << 17;
+pub(crate) const RESIZE_REDIRECT_MASK: c_long = 1 << 18;
+pub(crate) const SUBSTRUCTURE_NOTIFY_MASK: c_long = 1 << 19;
+pub(crate) const SUBSTRUCTURE_REDIRECT_MASK: c_long = 1 << 20;
+pub(crate) const FOCUS_CHANGE_MASK: c_long = 1 << 21;
+pub(crate) const PROPERTY_CHANGE_MASK: c_long = 1 << 22;
+pub(crate) const COLORMAP_CHANGE_MASK: c_long = 1 << 23;
+pub(crate) const OWNER_GRAB_BUTTON_MASK: c_long = 1 << 24;
 
 // Event Names
 
-pub(crate) const KEY_PRESS: usize = 2;
-pub(crate) const KEY_RELEASE: usize = 3;
-pub(crate) const BUTTON_PRESS: usize = 4;
-pub(crate) const BUTTON_RELEASE: usize = 5;
-pub(crate) const MOTION_NOTIFY: usize = 6;
-pub(crate) const ENTER_NOTIFY: usize = 7;
-pub(crate) const LEAVE_NOTIFY: usize = 8;
-pub(crate) const FOCUS_IN: usize = 9;
-pub(crate) const FOCUS_OUT: usize = 10;
-pub(crate) const KEYMAP_NOTIFY: usize = 11;
-pub(crate) const EXPOSE: usize = 12;
-pub(crate) const GRAPHICS_EXPOSE: usize = 13;
-pub(crate) const NO_EXPOSE: usize = 14;
-pub(crate) const VISIBILITY_NOTIFY: usize = 15;
-pub(crate) const CREATE_NOTIFY: usize = 16;
-pub(crate) const DESTROY_NOTIFY: usize = 17;
-pub(crate) const UNMAP_NOTIFY: usize = 18;
-pub(crate) const MAP_NOTIFY: usize = 19;
-pub(crate) const MAP_REQUEST: usize = 20;
-pub(crate) const REPARENT_NOTIFY: usize = 21;
-pub(crate) const CONFIGURE_NOTIFY: usize = 22;
-pub(crate) const CONFIGURE_REQUEST: usize = 23;
-pub(crate) const GRAVITY_NOTIFY: usize = 24;
-pub(crate) const RESIZE_REQUEST: usize = 25;
-pub(crate) const CIRCULATE_NOTIFY: usize = 26;
-pub(crate) const CIRCULATE_REQUEST: usize = 27;
-pub(crate) const PROPERTY_NOTIFY: usize = 28;
-pub(crate) const SELECTION_CLEAR: usize = 29;
-pub(crate) const SELECTION_REQUEST: usize = 30;
-pub(crate) const SELECTION_NOTIFY: usize = 31;
-pub(crate) const COLORMAP_NOTIFY: usize = 32;
-pub(crate) const CLIENT_MESSAGE: usize = 33;
-pub(crate) const MAPPING_NOTIFY: usize = 34;
-pub(crate) const GENERIC_EVENT: usize = 35;
-pub(crate) const LAST_EVENT: usize = 36; /* must be bigger than any event # */
+pub(crate) const KEY_PRESS: c_int = 2;
+pub(crate) const KEY_RELEASE: c_int = 3;
+pub(crate) const BUTTON_PRESS: c_int = 4;
+pub(crate) const BUTTON_RELEASE: c_int = 5;
+pub(crate) const MOTION_NOTIFY: c_int = 6;
+pub(crate) const ENTER_NOTIFY: c_int = 7;
+pub(crate) const LEAVE_NOTIFY: c_int = 8;
+pub(crate) const FOCUS_IN: c_int = 9;
+pub(crate) const FOCUS_OUT: c_int = 10;
+pub(crate) const KEYMAP_NOTIFY: c_int = 11;
+pub(crate) const EXPOSE: c_int = 12;
+pub(crate) const GRAPHICS_EXPOSE: c_int = 13;
+pub(crate) const NO_EXPOSE: c_int = 14;
+pub(crate) const VISIBILITY_NOTIFY: c_int = 15;
+pub(crate) const CREATE_NOTIFY: c_int = 16;
+pub(crate) const DESTROY_NOTIFY: c_int = 17;
+pub(crate) const UNMAP_NOTIFY: c_int = 18;
+pub(crate) const MAP_NOTIFY: c_int = 19;
+pub(crate) const MAP_REQUEST: c_int = 20;
+pub(crate) const REPARENT_NOTIFY: c_int = 21;
+pub(crate) const CONFIGURE_NOTIFY: c_int = 22;
+pub(crate) const CONFIGURE_REQUEST: c_int = 23;
+pub(crate) const GRAVITY_NOTIFY: c_int = 24;
+pub(crate) const RESIZE_REQUEST: c_int = 25;
+pub(crate) const CIRCULATE_NOTIFY: c_int = 26;
+pub(crate) const CIRCULATE_REQUEST: c_int = 27;
+pub(crate) const PROPERTY_NOTIFY: c_int = 28;
+pub(crate) const SELECTION_CLEAR: c_int = 29;
+pub(crate) const SELECTION_REQUEST: c_int = 30;
+pub(crate) const SELECTION_NOTIFY: c_int = 31;
+pub(crate) const COLORMAP_NOTIFY: c_int = 32;
+pub(crate) const CLIENT_MESSAGE: c_int = 33;
+pub(crate) const MAPPING_NOTIFY: c_int = 34;
+pub(crate) const GENERIC_EVENT: c_int = 35;
+pub(crate) const LAST_EVENT: c_int = 36; /* must be bigger than any event # */
 
 // Error Codes
 pub(crate) const SUCCESS: u8 = 0;
@@ -1344,9 +1344,9 @@ pub(crate) const XA_WM_NORMAL_HINTS: Atom = 40;
 pub(crate) const XA_WM_TRANSIENT_FOR: Atom = 68;
 
 //property Modes
-pub(crate) const PROP_MODE_REPLACE: u8 = 0;
-pub(crate) const PROP_MODE_PREPEND: u8 = 1;
-pub(crate) const PROP_MODE_APPEND: u8 = 2;
+pub(crate) const PROP_MODE_REPLACE: c_int = 0;
+pub(crate) const PROP_MODE_PREPEND: c_int = 1;
+pub(crate) const PROP_MODE_APPEND: c_int = 2;
 
 /* Key masks. Used as modifiers to GrabButton and GrabKey, results of QueryPointer,
 state in various key-, mouse-, and button-related events. */
