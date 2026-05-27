@@ -310,7 +310,6 @@ impl Drw {
         }
     }
 
-    //TODO: Double check unused variables
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn text(
         &mut self,
@@ -322,7 +321,6 @@ impl Drw {
         mut text: *const i8,
         invert: bool,
     ) -> i32 {
-        let mut ty: i32;
         let mut ellipsis_x: i32 = 0;
         let mut tmpw: u32 = 0;
         let mut ew: u32;
@@ -472,7 +470,7 @@ impl Drw {
                         .scheme
                         .clone()
                         .expect("checked above to exist in case of render");
-                    ty = y
+                    let ty = y
                         + (h as i32 - unsafe { usedfont.as_ref().h as i32 }) / 2
                         + unsafe { usedfont.as_ref().xfont.as_ref() }.ascent;
                     unsafe {
@@ -569,7 +567,6 @@ impl Drw {
                 unsafe { FcPatternDestroy(fcpattern) };
 
                 if let Some(match_) = match_ {
-                    // let mut usedfont = ;
                     if let Some(uf) = self.xfont_create(None, Some(match_))
                         && unsafe {
                             XftCharExists(
