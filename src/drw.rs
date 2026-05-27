@@ -38,7 +38,7 @@ fn utf8decode(s_in: *const i8) -> (i32, i64, bool) {
 
     let mut cp: i64 = (unsafe { *s } & LEADING_MASK[(len - 1) as usize]) as i64;
     for i in 1..len {
-        if unsafe { *s.add(i as usize) } == b'0' || (unsafe { *s.add(i as usize) } & 0xC0) != 0x80 {
+        if unsafe { *s.add(i as usize) } == b'\0' || (unsafe { *s.add(i as usize) } & 0xC0) != 0x80 {
             return (i, u, err);
         }
         cp = (cp << 6) | (unsafe { *s.add(i as usize) } & 0x3F) as i64;
@@ -58,7 +58,7 @@ pub(crate) struct Cur {
 
 #[derive(Debug)]
 pub(crate) struct Fnt {
-    dyp: NonNull<Display>,
+    dpy: NonNull<Display>,
     pub(crate) h: u32,
     pub(crate) xfont: NonNull<XftFont>,
     pub(crate) pattern: Option<NonNull<FcPattern>>,
@@ -192,8 +192,8 @@ impl Drw {
         }
 
         let font = Box::new(Fnt {
-            dyp: self.dpy,
-            h: unsafe { xfont.as_ref() }.ascent as u32,
+            dpy: self.dpy,
+            h: unsafe { xfont.as_ref().ascent + xfont.as_ref().descent } as u32,
             xfont,
             pattern,
             next: None,
@@ -594,8 +594,10 @@ impl Drw {
                                 curfont = unsafe { cf.as_ref().next };
                             } else {
                                 unsafe { cf.as_mut().next = Some(uf) };
+                                break;
                             }
                         }
+                        usedfont = uf;
                     } else {
                         //TODO:xfont_free destructor;
                         // self.xfont_free(usedfont)
@@ -636,7 +638,6 @@ impl Drw {
         unsafe { XSync(self.dpy.as_ptr(), 0) };
     }
 
-    //TODO: Some issue here
     pub(crate) fn fontset_getwidth(&mut self, text: *const i8) -> u32 {
         if self.fonts.is_none() || text.is_null() {
             return 0;
@@ -674,9 +675,9 @@ fn font_getexts(
     let mut ext: MaybeUninit<XGlyphInfo> = MaybeUninit::uninit();
     unsafe {
         XftTextExtentsUtf8(
-            font.as_ref().dyp.as_ptr(),
+            font.as_ref().dpy.as_ptr(),
             font.as_ref().xfont.as_ptr(),
-            ch as *const char as *const u8,
+            ch as *const u8,
             len,
             (&mut ext) as *mut MaybeUninit<XGlyphInfo> as *mut XGlyphInfo,
         )
@@ -708,6 +709,6 @@ impl Drop for Fnt {
         if let Some(pat) = self.pattern {
             unsafe { FcPatternDestroy(pat.as_ptr()) };
         }
-        unsafe { XftFontClose(self.dyp.as_ptr(), self.xfont.as_ptr()) };
+        unsafe { XftFontClose(self.dpy.as_ptr(), self.xfont.as_ptr()) };
     }
 }
