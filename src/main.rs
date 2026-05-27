@@ -1,12 +1,11 @@
 // #![allow(dead_code)]
 
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{CStr, CString};
 use std::io::{Write, stderr};
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
-use crate::config::DEMENUCMD;
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
 
@@ -303,39 +302,42 @@ fn tile(m: &mut Monitor, globals: &mut Globals) {
     let mut ty = 0u32;
     c = nexttiled(m.clients);
 
-    while let Some(c_inner) = c {
-        let c_ref = unsafe { c_inner.as_ref() };
+    while let Some(mut c_inner) = c {
+        let (bw, height, next) = unsafe {
+            let r = c_inner.as_ref();
+            (r.bw, r.height(), r.next)
+        };
         if i < m.nmaster as u32 {
             let h: u32 = (m.wh as u32 - my) / (n.min(m.nmaster as u32) - i);
             resize(
-                c_inner,
+                unsafe { c_inner.as_mut() },
                 m.wx,
                 m.wy + my as i32,
-                mw as i32 - (2 * c_ref.bw),
-                h as i32 - (2 * c_ref.bw),
+                mw as i32 - (2 * bw),
+                h as i32 - (2 * bw),
                 false,
                 globals,
             );
-            if my as i32 + c_ref.height() < m.wh {
-                my += c_ref.height() as u32;
+            if my as i32 + height < m.wh {
+                my += height as u32;
             }
         } else {
             let h = (m.wh as u32 - ty) / (n - i);
             resize(
-                c_inner,
+                unsafe { c_inner.as_mut() },
                 m.wx + mw as i32,
                 m.wy + ty as i32,
-                m.ww - mw as i32 - (2 * c_ref.bw),
-                h as i32 - (2 * c_ref.bw),
+                m.ww - mw as i32 - (2 * bw),
+                h as i32 - (2 * bw),
                 false,
                 globals,
             );
-            if ty as i32 + c_ref.height() < m.wh {
-                ty += c_ref.height() as u32;
+            if ty as i32 + height < m.wh {
+                ty += height as u32;
             }
         }
 
-        c = nexttiled(unsafe { c_inner.as_ref() }.next);
+        c = nexttiled(next);
         i += 1;
     }
 }
@@ -360,17 +362,18 @@ fn monocle(m: &mut Monitor, globals: &mut Globals) {
         };
     }
     let mut c = nexttiled(m.clients);
-    while let Some(c_inner) = c {
+    while let Some(mut c_inner) = c {
+        let (bw, next) = unsafe { (c_inner.as_ref().bw, c_inner.as_ref().next) };
         resize(
-            c_inner,
+            unsafe { c_inner.as_mut() },
             m.wx,
             m.wy,
-            m.ww - 2 * unsafe { c_inner.as_ref() }.bw,
-            m.wh - 2 * unsafe { c_inner.as_ref() }.bw,
+            m.ww - 2 * bw,
+            m.wh - 2 * bw,
             false,
             globals,
         );
-        c = nexttiled(unsafe { c_inner.as_ref() }.next);
+        c = nexttiled(next);
     }
 }
 
@@ -429,7 +432,8 @@ fn toggletag(arg: &Arg, globals: &mut Globals) {
     }
 }
 
-//TODO: using libc and not process because setsid is unstable.
+//NOTE: using libc and not `std::process` because setsid in `std::os::linux::process::CommandExt` is unstable.
+//update when stable.
 fn spawn(arg: &Arg, globals: &mut Globals) {
     let mut sa: libc::sigaction = unsafe { core::mem::zeroed() };
     let Arg::Command(arr) = arg else {
@@ -440,7 +444,7 @@ fn spawn(arg: &Arg, globals: &mut Globals) {
     let cs_arr: Vec<CString> = arr
         .iter()
         .map(|&elem| {
-            let s = if elem == "PLACEHOLDER" && arr == &DEMENUCMD {
+            let s = if elem == "PLACEHOLDER" && arr == &config::DMENUCMD {
                 format!("{}", mon_num)
             } else {
                 elem.to_string()
@@ -452,10 +456,10 @@ fn spawn(arg: &Arg, globals: &mut Globals) {
     com.push(core::ptr::null()); // null terminator required by execvp
 
     if unsafe { libc::fork() } == 0 {
-        // TODO: dwm does a check here is to see if dpy is null? Im not sure if it ever can be?
-        // if globals.dpy.as_ptr().is_null(){
+        // C dwm guards this with `if (dpy)`, but in Rust globals.dpy is NonNull<Display>,
+        // guaranteed non-null by construction. If we reach spawn, setup() succeeded and dpy
+        // is always valid, so the check is unnecessary.
         unsafe { libc::close(connection_number(globals.dpy.as_ptr())) };
-        // }
 
         unsafe { libc::setsid() };
         unsafe { libc::sigemptyset(&mut sa.sa_mask) };
@@ -501,7 +505,7 @@ fn setlayout(arg: &Arg, globals: &mut Globals) {
     if unsafe { globals.selmon.as_ref() }.sel.is_some() {
         arrange(Some(globals.selmon), globals);
     } else {
-        drawbar(globals.selmon, globals);
+        drawbar(unsafe { globals.selmon.as_ref() }, globals);
     }
 }
 
@@ -536,7 +540,8 @@ fn togglefloating(_arg: &Arg, globals: &mut Globals) {
     }
     sel.isfloating = !sel.isfloating || sel.isfixed;
     if sel.isfloating {
-        resize(sel_nn, sel.x, sel.y, sel.w, sel.h, false, globals);
+        let (x, y, w, h) = (sel.x, sel.y, sel.w, sel.h);
+        resize(sel, x, y, w, h, false, globals);
     }
     arrange(Some(globals.selmon), globals);
 }
@@ -591,7 +596,7 @@ fn focusstack(arg: &Arg, globals: &mut Globals) {
 
     if c.is_some() {
         focus(c, globals);
-        restack(globals.selmon, globals);
+        restack(unsafe { globals.selmon.as_ref() }, globals);
     }
 }
 
@@ -658,7 +663,7 @@ fn killclient(_arg: &Arg, globals: &mut Globals) {
     let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
         return;
     };
-    if !sendevent(sel, globals.wmatom[WMAtom::Delete as usize], globals) {
+    if !sendevent(unsafe { sel.as_ref() }, globals.wmatom[WMAtom::Delete as usize], globals) {
         unsafe {
             XGrabServer(globals.dpy.as_ptr());
             XSetErrorHandler(xerrordummy);
@@ -679,12 +684,11 @@ fn focusmon(arg: &Arg, globals: &mut Globals) {
         unreachable!("invalid argument to focus mon")
     };
     let m = dirtomon(*i, globals);
-    if m == Some(globals.selmon) {
+    if m == globals.selmon {
         return;
     }
     unfocus(unsafe { globals.selmon.as_ref() }.sel, false, globals);
-    //TODO check if selmon must be optional;
-    globals.selmon = m.expect("valid monitor?");
+    globals.selmon = m;
     focus(None, globals);
 }
 
@@ -701,8 +705,7 @@ fn tagmon(arg: &Arg, globals: &mut Globals) {
         unsafe { globals.selmon.as_ref() }
             .sel
             .expect("checked above to be not None"),
-        //TODO: check this
-        dirtomon(*i, globals).expect("should be Nonull"),
+        dirtomon(*i, globals),
         globals,
     );
 }
@@ -710,14 +713,14 @@ fn tagmon(arg: &Arg, globals: &mut Globals) {
 fn movemouse(_arg: &Arg, globals: &mut Globals) {
     const GRAB_SUCCESS: i32 = 0;
 
-    let Some(c) = unsafe { globals.selmon.as_ref() }.sel else {
+    let Some(mut c) = unsafe { globals.selmon.as_ref() }.sel else {
         return;
     };
     if unsafe { c.as_ref() }.isfullscreen {
         return;
     }
     let c_ref = unsafe { c.as_ref() };
-    restack(globals.selmon, globals);
+    restack(unsafe { globals.selmon.as_ref() }, globals);
     let ocx = c_ref.x;
     let ocy = c_ref.y;
     if unsafe {
@@ -804,15 +807,8 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
                     .is_none()
                     || unsafe { c.as_ref().isfloating }
                 {
-                    resize(
-                        c,
-                        nx,
-                        ny,
-                        unsafe { c.as_ref().w },
-                        unsafe { c.as_ref().h },
-                        true,
-                        globals,
-                    );
+                    let (w, h) = unsafe { (c.as_ref().w, c.as_ref().h) };
+                    resize(unsafe { c.as_mut() }, nx, ny, w, h, true, globals);
                 }
             }
             _ => {}
@@ -839,14 +835,14 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
 fn resizemouse(_arg: &Arg, globals: &mut Globals) {
     const GRAB_SUCCESS: i32 = 0;
 
-    let Some(c) = unsafe { globals.selmon.as_ref() }.sel else {
+    let Some(mut c) = unsafe { globals.selmon.as_ref() }.sel else {
         return;
     };
     let cr = unsafe { c.as_ref() }; /* no support resizing fullscreen windows by mouse */
     if cr.isfullscreen {
         return;
     }
-    restack(globals.selmon, globals);
+    restack(unsafe { globals.selmon.as_ref() }, globals);
     let ocx = cr.x;
     let ocy = cr.y;
     if unsafe {
@@ -926,7 +922,7 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
                     .is_none()
                     || cr.isfloating
                 {
-                    resize(c, cr.x, cr.y, nw, nh, true, globals);
+                    resize(unsafe { c.as_mut() }, cr.x, cr.y, nw, nh, true, globals);
                 }
             }
             _ => {}
@@ -1006,7 +1002,7 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
         }
     } else if let Some(c) = wintoclient(ev.window, globals) {
         focus(Some(c), globals);
-        restack(globals.selmon, globals);
+        restack(unsafe { globals.selmon.as_ref() }, globals);
 
         unsafe { XAllowEvents(globals.dpy.as_ptr(), REPLAY_POINTER, CURRENT_TIME) };
         click = ClickState::ClientWin;
@@ -1036,7 +1032,7 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
 fn clientmessage(ev: &mut XEvent, globals: &mut Globals) {
     let cme: &mut XClientMessageEvent = unsafe { &mut ev.xclient };
     let c = wintoclient(cme.window, globals);
-    let Some(c) = c else {
+    let Some(mut c) = c else {
         return;
     };
     if cme.message_type == globals.netatom[NetAtom::WMState as usize] {
@@ -1044,7 +1040,7 @@ fn clientmessage(ev: &mut XEvent, globals: &mut Globals) {
             || unsafe { cme.data.l }[2] == globals.netatom[NetAtom::WMFullscreen as usize] as i64
         {
             setfullscreen(
-                c,
+                unsafe { c.as_mut() },
                 unsafe { cme.data.l }[0] == 1  /* _NET_WM_STATE_ADD    */
                 || (unsafe { cme.data.l }[0] == 2 /* _NET_WM_STATE_TOGGLE */
                 && !unsafe { c.as_ref()}.isfullscreen ),
@@ -1058,7 +1054,7 @@ fn clientmessage(ev: &mut XEvent, globals: &mut Globals) {
                 .expect("early termination"))
         && !unsafe { c.as_ref() }.isurgent
     {
-        seturgent(c, true, globals);
+        seturgent(unsafe { c.as_mut() }, true, globals);
     }
 }
 
@@ -1099,9 +1095,8 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
             if (c_ref.y + c_ref.h) > m.my + m.mh && c_ref.isfloating {
                 c_ref.y = m.my + (m.mh / 2 - c_ref.height() / 2); /* center in y direction */
             }
-            if (vm & (CWX | CWY)) != 0 && (vm & (CW_WIDTH | CW_HEIGHT)) == 0
-            {
-                configure(c, globals);
+            if (vm & (CWX | CWY)) != 0 && (vm & (CW_WIDTH | CW_HEIGHT)) == 0 {
+                configure(c_ref, globals);
             }
             if is_visible(c) {
                 unsafe {
@@ -1116,7 +1111,7 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
                 };
             }
         } else {
-            configure(c, globals);
+            configure(c_ref, globals);
         }
     } else {
         let mut wc = XWindowChanges {
@@ -1128,7 +1123,14 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
             sibling: ev.above,
             stack_mode: ev.detail,
         };
-        unsafe { XConfigureWindow(globals.dpy.as_ptr(), ev.window, ev.value_mask as u32, &mut wc) };
+        unsafe {
+            XConfigureWindow(
+                globals.dpy.as_ptr(),
+                ev.window,
+                ev.value_mask as u32,
+                &mut wc,
+            )
+        };
     }
     unsafe { XSync(globals.dpy.as_ptr(), 0) };
 }
@@ -1147,10 +1149,11 @@ fn configurenotify(ev: &mut XEvent, globals: &mut Globals) {
             while let Some(m_inner) = m {
                 let m_inner = unsafe { m_inner.as_ref() };
                 let mut c = m_inner.clients;
-                while let Some(c_inner) = c {
+                while let Some(mut c_inner) = c {
                     if unsafe { c_inner.as_ref() }.isfullscreen {
                         resizeclient(
-                            c_inner, m_inner.mx, m_inner.my, m_inner.mw, m_inner.mh, globals,
+                            unsafe { c_inner.as_mut() },
+                            m_inner.mx, m_inner.my, m_inner.mw, m_inner.mh, globals,
                         );
                     }
                     c = unsafe { c_inner.as_ref() }.next
@@ -1208,7 +1211,7 @@ fn expose(ev: &mut XEvent, globals: &mut Globals) {
     let ev: &mut XExposeEvent = unsafe { &mut ev.xexpose };
     if ev.count == 0 {
         let m = wintomon(ev.window, globals);
-        drawbar(m, globals);
+        drawbar(unsafe { m.as_ref() }, globals);
     }
 }
 
@@ -1217,7 +1220,7 @@ fn focusin(ev: &mut XEvent, globals: &mut Globals) {
     if let Some(sel) = unsafe { globals.selmon.as_ref() }.sel
         && ev.window != unsafe { sel.as_ref() }.win
     {
-        setfocus(sel, globals);
+        setfocus(unsafe { sel.as_ref() }, globals);
     }
 }
 
@@ -1302,17 +1305,17 @@ fn propertynotify(ev: &mut XEvent, globals: &mut Globals) {
                 unsafe { c.as_mut() }.hintsvalid = false;
             }
             XA_WM_HINTS => {
-                updatewmhints(c, globals);
+                updatewmhints(unsafe { c.as_mut() }, globals);
                 drawbars(globals);
             }
             _ => {}
         }
         if ev.atom == XA_WM_NAME || ev.atom == globals.netatom[NetAtom::WMName as usize] {
-            updatetitle(c, globals);
+            updatetitle(unsafe { c.as_mut() }, globals);
             if let Some(sel) = unsafe { c.as_ref().mon.as_ref() }.sel
                 && c == sel
             {
-                drawbar(unsafe { c.as_ref() }.mon, globals);
+                drawbar(unsafe { c.as_ref().mon.as_ref() }, globals);
             }
         }
         if ev.atom == globals.netatom[NetAtom::WMWindowType as usize] {
@@ -1326,7 +1329,7 @@ fn unmapnotify(ev: &mut XEvent, globals: &mut Globals) {
 
     if let Some(c) = wintoclient(ev.window, globals) {
         if ev.send_event != 0 {
-            setclientstate(c, WITHDRAWN_STATE as i64, globals);
+            setclientstate(unsafe { c.as_ref() }, WITHDRAWN_STATE as i64, globals);
         } else {
             unmanage(c, false, globals);
         }
@@ -1350,23 +1353,15 @@ extern "C" fn xerrorstart(_dpy: *mut Display, _ee: *mut XErrorEvent) -> i32 {
 extern "C" fn xerror(dpy: *mut Display, ee: *mut XErrorEvent) -> i32 {
     let ee = unsafe { &mut *ee };
 
-    if ee.error_code == external_functions::BAD_WINDOW
-        || (ee.request_code == external_functions::X_SETINPUTFOCUS
-            && ee.error_code == external_functions::BAD_MATCH)
-        || (ee.request_code == external_functions::X_POLYTEXT8
-            && ee.error_code == external_functions::BAD_DRAWABLE)
-        || (ee.request_code == external_functions::X_POLYFILLRECTANGLE
-            && ee.error_code == external_functions::BAD_DRAWABLE)
-        || (ee.request_code == external_functions::X_POLYSEGMENT
-            && ee.error_code == external_functions::BAD_DRAWABLE)
-        || (ee.request_code == external_functions::X_CONFIGUREWINDOW
-            && ee.error_code == external_functions::BAD_MATCH)
-        || (ee.request_code == external_functions::X_GRABBUTTON
-            && ee.error_code == external_functions::BAD_ACCESS)
-        || (ee.request_code == external_functions::X_GRABKEY
-            && ee.error_code == external_functions::BAD_ACCESS)
-        || (ee.request_code == external_functions::X_COPYAREA
-            && ee.error_code == external_functions::BAD_DRAWABLE)
+    if ee.error_code == BAD_WINDOW
+        || (ee.request_code == X_SETINPUTFOCUS && ee.error_code == BAD_MATCH)
+        || (ee.request_code == X_POLYTEXT8 && ee.error_code == BAD_DRAWABLE)
+        || (ee.request_code == X_POLYFILLRECTANGLE && ee.error_code == BAD_DRAWABLE)
+        || (ee.request_code == X_POLYSEGMENT && ee.error_code == BAD_DRAWABLE)
+        || (ee.request_code == X_CONFIGUREWINDOW && ee.error_code == BAD_MATCH)
+        || (ee.request_code == X_GRABBUTTON && ee.error_code == BAD_ACCESS)
+        || (ee.request_code == X_GRABKEY && ee.error_code == BAD_ACCESS)
+        || (ee.request_code == X_COPYAREA && ee.error_code == BAD_DRAWABLE)
     {
         return 0;
     }
@@ -1473,27 +1468,27 @@ fn getrootptr(x: &mut i32, y: &mut i32, globals: &mut Globals) -> bool {
     }) != 0
 }
 
-fn updatewmhints(mut c: NonNull<Client>, globals: &Globals) {
+fn updatewmhints(c: &mut Client, globals: &Globals) {
     const INPUT_HINT: i64 = 1 << 0;
     const X_URGENCY_HINT: i64 = 1 << 8;
 
-    let wmh: *mut XWMHints = unsafe { XGetWMHints(globals.dpy.as_ptr(), c.as_ref().win) };
+    let wmh: *mut XWMHints = unsafe { XGetWMHints(globals.dpy.as_ptr(), c.win) };
     if !wmh.is_null() {
-        if let Some(sel) = unsafe { globals.selmon.as_ref() }.sel
-            && c == sel
-            && unsafe { &*wmh }.flags & X_URGENCY_HINT != 0
-        {
+        let is_sel = unsafe { globals.selmon.as_ref() }
+            .sel
+            .map_or(false, |sel| core::ptr::eq(c as *const _, sel.as_ptr()));
+        if is_sel && unsafe { &*wmh }.flags & X_URGENCY_HINT != 0 {
             unsafe { &mut *wmh }.flags &= !X_URGENCY_HINT;
-            unsafe { XSetWMHints(globals.dpy.as_ptr(), c.as_ref().win, wmh) };
+            unsafe { XSetWMHints(globals.dpy.as_ptr(), c.win, wmh) };
         } else {
-            unsafe { c.as_mut() }.isurgent = unsafe { &*wmh }.flags & X_URGENCY_HINT != 0
+            c.isurgent = unsafe { &*wmh }.flags & X_URGENCY_HINT != 0;
         }
-        if unsafe { &*wmh }.flags & INPUT_HINT != 0 {
-            unsafe { c.as_mut() }.neverfocus = unsafe { &*wmh }.input == 0
+        c.neverfocus = if unsafe { &*wmh }.flags & INPUT_HINT != 0 {
+            unsafe { &*wmh }.input == 0
         } else {
-            unsafe { c.as_mut() }.neverfocus = false;
-        }
-        unsafe { XFree(wmh as *mut c_void) };
+            false
+        };
+        unsafe { XFree(wmh.cast()) };
     }
 }
 
@@ -1664,12 +1659,12 @@ fn gettextprop(w: Window, atom: Atom, text: *mut i8, size: u32, globals: &Global
         unsafe { XFreeStringList(list) };
     }
     unsafe { *{ text.add((size - 1) as usize) } = b'\0' as i8 };
-    unsafe { XFree(name.value as *mut c_void) };
+    unsafe { XFree(name.value.cast()) };
 
     true
 }
 
-fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
+fn drawbar(m: &Monitor, globals: &mut Globals) {
     let mut tw = 0i32;
     let boxs = unsafe {
         globals
@@ -1691,12 +1686,12 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
     let mut occ = 0u32;
     let mut urg = 0u32;
 
-    let m_ref = unsafe { m.as_ref() };
-    if !m_ref.showbar {
+    if !m.showbar {
         return;
     }
 
-    if m == globals.selmon {
+    let is_selmon = core::ptr::eq(m, globals.selmon.as_ptr());
+    if is_selmon {
         globals
             .drw
             .setscheme(Rc::clone(&globals.scheme[SchemeState::Norm as usize]));
@@ -1708,7 +1703,7 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
             + 2; /* 2px right padding */
 
         globals.drw.text(
-            unsafe { m.as_ref().ww } - tw,
+            m.ww - tw,
             0,
             tw as u32,
             globals.bh as u32,
@@ -1717,7 +1712,7 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
             false,
         );
     }
-    let mut c = m_ref.clients;
+    let mut c = m.clients;
     while let Some(c_inner) = c {
         let c_ref = unsafe { c_inner.as_ref() };
         occ |= c_ref.tags;
@@ -1731,7 +1726,7 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
         let tag = CString::new(config::TAGS[i]).expect("valid c string");
         let w = globals.drw.fontset_getwidth(tag.as_ptr()) + globals.lrpad as u32;
         globals.drw.setscheme(Rc::clone(
-            &globals.scheme[if (m_ref.tagset[m_ref.seltags as usize] & 1 << i) != 0 {
+            &globals.scheme[if (m.tagset[m.seltags as usize] & 1 << i) != 0 {
                 SchemeState::Sel as usize
             } else {
                 SchemeState::Norm as usize
@@ -1752,21 +1747,17 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
                 boxs as i32,
                 boxw,
                 boxw,
-                if m == globals.selmon
-                    && let Some(sel) = unsafe { globals.selmon.as_ref() }.sel
-                    && unsafe { sel.as_ref() }.tags & 1 << i != 0
-                {
-                    true
-                } else {
-                    false
-                },
+                is_selmon
+                    && unsafe { globals.selmon.as_ref() }
+                        .sel
+                        .map_or(false, |sel| unsafe { sel.as_ref() }.tags & 1 << i != 0),
                 urg & 1 << i != 0,
             );
         }
         x += w as i32;
     }
 
-    let w = globals.drw.fontset_getwidth(&m_ref.ltsymbol as *const i8) + globals.lrpad as u32;
+    let w = globals.drw.fontset_getwidth(&m.ltsymbol as *const i8) + globals.lrpad as u32;
     globals
         .drw
         .setscheme(Rc::clone(&globals.scheme[SchemeState::Norm as usize]));
@@ -1776,16 +1767,16 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
         w,
         globals.bh as u32,
         globals.lrpad as u32 / 2,
-        &m_ref.ltsymbol as *const i8,
+        &m.ltsymbol as *const i8,
         false,
     );
 
-    let w = m_ref.ww - tw - x;
+    let w = m.ww - tw - x;
     if w > globals.bh {
-        if let Some(m_sel) = m_ref.sel {
+        if let Some(m_sel) = m.sel {
             let m_sel_ref = unsafe { m_sel.as_ref() };
             globals.drw.setscheme(Rc::clone(
-                &globals.scheme[if m == globals.selmon {
+                &globals.scheme[if is_selmon {
                     SchemeState::Sel as usize
                 } else {
                     SchemeState::Norm as usize
@@ -1800,7 +1791,7 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
                 &m_sel_ref.name as *const i8,
                 false,
             );
-            if unsafe { m_sel.as_ref() }.isfloating {
+            if m_sel_ref.isfloating {
                 globals.drw.rect(
                     x + boxs as i32,
                     boxs as i32,
@@ -1821,13 +1812,13 @@ fn drawbar(m: NonNull<Monitor>, globals: &mut Globals) {
     }
     globals
         .drw
-        .map(m_ref.barwin, 0, 0, m_ref.ww as u32, globals.bh as u32)
+        .map(m.barwin, 0, 0, m.ww as u32, globals.bh as u32)
 }
 
 fn drawbars(globals: &mut Globals) {
     let mut m = Some(globals.mons);
     while let Some(m_inner) = m {
-        drawbar(m_inner, globals);
+        drawbar(unsafe { m_inner.as_ref() }, globals);
         m = unsafe { m_inner.as_ref() }.next;
     }
 }
@@ -1850,7 +1841,7 @@ fn updatestatus(globals: &mut Globals) {
         };
     }
 
-    drawbar(globals.selmon, globals);
+    drawbar(unsafe { globals.selmon.as_ref() }, globals);
 }
 
 fn updatenumlockmask(globals: &mut Globals) {
@@ -1932,11 +1923,11 @@ fn grabkeys(globals: &mut Globals) {
                 }
             }
         }
-        unsafe { XFree(syms as *mut c_void) };
+        unsafe { XFree(syms.cast()) };
     }
 }
 
-fn grabbuttons(c: NonNull<Client>, focused: bool, globals: &mut Globals) {
+fn grabbuttons(c: &Client, focused: bool, globals: &mut Globals) {
     updatenumlockmask(globals);
     {
         const LOCK_MASK: u32 = 1 << 1;
@@ -1947,21 +1938,14 @@ fn grabbuttons(c: NonNull<Client>, focused: bool, globals: &mut Globals) {
             globals.numlockmask | LOCK_MASK,
         ];
 
-        unsafe {
-            XUngrabButton(
-                globals.dpy.as_ptr(),
-                ANY_BUTTON,
-                ANY_MODIFIER,
-                c.as_ref().win,
-            )
-        };
+        unsafe { XUngrabButton(globals.dpy.as_ptr(), ANY_BUTTON, ANY_MODIFIER, c.win) };
         if !focused {
             unsafe {
                 XGrabButton(
                     globals.dpy.as_ptr(),
                     ANY_BUTTON,
                     ANY_MODIFIER,
-                    c.as_ref().win,
+                    c.win,
                     0,
                     (BUTTON_PRESS_MASK | BUTTON_RELEASE_MASK) as u32,
                     GRAB_MODE_SYNC,
@@ -1979,7 +1963,7 @@ fn grabbuttons(c: NonNull<Client>, focused: bool, globals: &mut Globals) {
                             globals.dpy.as_ptr(),
                             config::BUTTONS[i].button,
                             config::BUTTONS[i].mask | modi,
-                            c.as_ref().win,
+                            c.win,
                             0,
                             (BUTTON_PRESS_MASK | BUTTON_RELEASE_MASK) as u32,
                             GRAB_MODE_ASYNC,
@@ -1994,10 +1978,9 @@ fn grabbuttons(c: NonNull<Client>, focused: bool, globals: &mut Globals) {
     }
 }
 
-fn seturgent(mut c: NonNull<Client>, urg: bool, globals: &Globals) {
-    // let wmh: *mut XWMHints;
-    unsafe { c.as_mut().isurgent = urg };
-    let wmh = unsafe { XGetWMHints(globals.dpy.as_ptr(), c.as_ref().win) };
+fn seturgent(c: &mut Client, urg: bool, globals: &Globals) {
+    c.isurgent = urg;
+    let wmh = unsafe { XGetWMHints(globals.dpy.as_ptr(), c.win) };
     if wmh.is_null() {
         return;
     }
@@ -2005,12 +1988,8 @@ fn seturgent(mut c: NonNull<Client>, urg: bool, globals: &Globals) {
     const X_URGENCY_HINT: i64 = 1 << 8;
 
     let f = unsafe { &*wmh }.flags;
-    unsafe { &mut *wmh }.flags = if urg {
-        f | X_URGENCY_HINT
-    } else {
-        f & !X_URGENCY_HINT
-    };
-    unsafe { XFree(wmh as *mut c_void) };
+    unsafe { &mut *wmh }.flags = if urg { f | X_URGENCY_HINT } else { f & !X_URGENCY_HINT };
+    unsafe { XFree(wmh.cast()) };
 }
 
 fn attach(mut c: NonNull<Client>) {
@@ -2055,20 +2034,19 @@ fn detachstack(mut c: NonNull<Client>) {
     }
 }
 
-fn sendevent(c: NonNull<Client>, proto: Atom, globals: &Globals) -> bool {
+fn sendevent(c: &Client, proto: Atom, globals: &Globals) -> bool {
     const CLIENT_MESSAGE: i32 = 33;
 
     let mut n: i32 = 0;
     let mut protocols: *mut Atom = core::ptr::null_mut();
     let mut exists = false;
 
-    if unsafe { XGetWMProtocols(globals.dpy.as_ptr(), c.as_ref().win, &mut protocols, &mut n) } != 0
-    {
+    if unsafe { XGetWMProtocols(globals.dpy.as_ptr(), c.win, &mut protocols, &mut n) } != 0 {
         while !exists && n > 0 {
             n -= 1;
             exists = unsafe { *protocols.add(n as usize) } == proto
         }
-        unsafe { XFree(protocols as *mut c_void) };
+        unsafe { XFree(protocols.cast()) };
     }
     if exists {
         let mut ev = XEvent {
@@ -2077,7 +2055,7 @@ fn sendevent(c: NonNull<Client>, proto: Atom, globals: &Globals) -> bool {
                 serial: 0,
                 send_event: 0,
                 display: core::ptr::null_mut(),
-                window: unsafe { c.as_ref().win },
+                window: c.win,
                 message_type: globals.wmatom[WMAtom::Protocols as usize],
                 format: 32,
                 data: XClientMessageEventData {
@@ -2088,7 +2066,7 @@ fn sendevent(c: NonNull<Client>, proto: Atom, globals: &Globals) -> bool {
         unsafe {
             XSendEvent(
                 globals.dpy.as_ptr(),
-                c.as_ref().win,
+                c.win,
                 0,
                 NO_EVENT_MASK,
                 &mut ev,
@@ -2113,7 +2091,7 @@ fn sendmon(mut c: NonNull<Client>, m: NonNull<Monitor>, globals: &mut Globals) {
     attachstack(c);
     if unsafe { c.as_ref() }.isfullscreen {
         resizeclient(
-            c,
+            unsafe { c.as_mut() },
             unsafe { m.as_ref() }.mx,
             unsafe { m.as_ref() }.my,
             unsafe { m.as_ref() }.mw,
@@ -2125,29 +2103,31 @@ fn sendmon(mut c: NonNull<Client>, m: NonNull<Monitor>, globals: &mut Globals) {
     arrange(None, globals);
 }
 
-fn dirtomon(dir: i32, globals: &Globals) -> Option<NonNull<Monitor>> {
-    let mut m;
+// dirtomon always returns a valid monitor. Callers must guard with
+// `if mons.next.is_none() { return; }` before calling to ensure ≥2 monitors exist.
+// In all three branches we either wrap around to `mons` (non-null by invariant) or
+// walk a linked list that is guaranteed to contain `selmon`.
+fn dirtomon(dir: i32, globals: &Globals) -> NonNull<Monitor> {
     if dir > 0 {
-        m = unsafe { globals.selmon.as_ref() }.next;
-        if m.is_none() {
-            m = Some(globals.mons);
-        }
+        // Next monitor, wrapping around to the first if selmon is the last.
+        unsafe { globals.selmon.as_ref() }.next.unwrap_or(globals.mons)
     } else if globals.selmon == globals.mons {
-        m = Some(globals.mons);
-        while let Some(m_inner) = m
-            && unsafe { m_inner.as_ref() }.next.is_some()
-        {
-            m = unsafe { m_inner.as_ref() }.next;
+        // Walk to the last monitor in the list.
+        let mut m = globals.mons;
+        while let Some(next) = unsafe { m.as_ref() }.next {
+            m = next;
         }
+        m
     } else {
-        m = Some(globals.mons);
-        while let Some(m_inner) = m
-            && unsafe { m_inner.as_ref() }.next != Some(globals.selmon)
-        {
-            m = unsafe { m_inner.as_ref() }.next;
+        // Walk to the predecessor of selmon.
+        let mut m = globals.mons;
+        while unsafe { m.as_ref() }.next != Some(globals.selmon) {
+            m = unsafe { m.as_ref() }
+                .next
+                .expect("selmon is always reachable from mons");
         }
+        m
     }
-    m
 }
 
 fn pop(c: NonNull<Client>, globals: &mut Globals) {
@@ -2157,12 +2137,12 @@ fn pop(c: NonNull<Client>, globals: &mut Globals) {
     arrange(Some(unsafe { c.as_ref() }.mon), globals);
 }
 
-fn setfocus(c: NonNull<Client>, globals: &Globals) {
+fn setfocus(c: &Client, globals: &Globals) {
     unsafe {
-        if !c.as_ref().neverfocus {
+        if !c.neverfocus {
             XSetInputFocus(
                 globals.dpy.as_ptr(),
-                c.as_ref().win,
+                c.win,
                 REVERT_TO_POINTER_ROOT,
                 CURRENT_TIME,
             );
@@ -2174,7 +2154,7 @@ fn setfocus(c: NonNull<Client>, globals: &Globals) {
             XA_WINDOW,
             32,
             PROP_MODE_REPLACE as i32,
-            (&c.as_ref().win) as *const _ as *const u8,
+            (&c.win) as *const _ as *const u8,
             1,
         );
     }
@@ -2183,7 +2163,7 @@ fn setfocus(c: NonNull<Client>, globals: &Globals) {
 
 fn unfocus(c: Option<NonNull<Client>>, setfocus: bool, globals: &mut Globals) {
     let Some(c) = c else { return };
-    grabbuttons(c, false, globals);
+    grabbuttons(unsafe { c.as_ref() }, false, globals);
     unsafe {
         XSetWindowBorder(
             globals.dpy.as_ptr(),
@@ -2226,17 +2206,17 @@ fn focus(mut c: Option<NonNull<Client>>, globals: &mut Globals) {
     {
         unfocus(Some(sel), false, globals);
     }
-    if let Some(c_inner) = c {
+    if let Some(mut c_inner) = c {
         let c_ref = unsafe { c_inner.as_ref() };
         if c_ref.mon != globals.selmon {
             globals.selmon = c_ref.mon;
         }
         if c_ref.isurgent {
-            seturgent(c_inner, false, globals)
+            seturgent(unsafe { c_inner.as_mut() }, false, globals)
         }
         detachstack(c_inner);
         attachstack(c_inner);
-        grabbuttons(c_inner, true, globals);
+        grabbuttons(c_ref, true, globals);
         unsafe {
             XSetWindowBorder(
                 globals.dpy.as_ptr(),
@@ -2244,7 +2224,7 @@ fn focus(mut c: Option<NonNull<Client>>, globals: &mut Globals) {
                 globals.scheme[SchemeState::Sel as usize][drw::COL_BORDER].pixel,
             )
         };
-        setfocus(c_inner, globals);
+        setfocus(c_ref, globals);
     } else {
         unsafe {
             XSetInputFocus(
@@ -2296,13 +2276,13 @@ fn getstate(w: Window, globals: &Globals) -> i64 {
     if n != 0 && format == 32 {
         result = unsafe { *p.cast::<i64>() };
     }
-    unsafe { XFree(p as *mut c_void) };
+    unsafe { XFree(p.cast()) };
 
     result
 }
 
-fn updatetitle(mut c: NonNull<Client>, globals: &Globals) {
-    let c_ref = unsafe { c.as_mut() };
+fn updatetitle(c: &mut Client, globals: &Globals) {
+    let c_ref = c;
     if !gettextprop(
         c_ref.win,
         globals.netatom[NetAtom::WMName as usize],
@@ -2323,12 +2303,12 @@ fn updatetitle(mut c: NonNull<Client>, globals: &Globals) {
     }
 }
 
-fn applyrules(mut c: NonNull<Client>, globals: &Globals) {
+fn applyrules(c: &mut Client, globals: &Globals) {
     let mut ch = XClassHint {
         res_name: core::ptr::null_mut(),
         res_class: core::ptr::null_mut(),
     };
-    let c_ref = unsafe { c.as_mut() };
+    let c_ref = c;
     c_ref.isfloating = false;
     c_ref.tags = 0;
     unsafe { XGetClassHint(globals.dpy.as_ptr(), c_ref.win, &mut ch) };
@@ -2393,10 +2373,10 @@ fn applyrules(mut c: NonNull<Client>, globals: &Globals) {
     }
 
     if !ch.res_class.is_null() {
-        unsafe { XFree(ch.res_class as *mut c_void) };
+        unsafe { XFree(ch.res_class.cast_mut().cast()) };
     }
     if !ch.res_name.is_null() {
-        unsafe { XFree(ch.res_name as *mut c_void) };
+        unsafe { XFree(ch.res_name.cast_mut().cast()) };
     }
 
     c_ref.tags = if c_ref.tags & TAGMASK != 0 {
@@ -2406,7 +2386,7 @@ fn applyrules(mut c: NonNull<Client>, globals: &Globals) {
     };
 }
 
-fn updatesizehints(mut c: NonNull<Client>, globals: &Globals) {
+fn updatesizehints(c: &mut Client, globals: &Globals) {
     const P_SIZE: i64 = 1 << 3;
     const P_MIN_SIZE: i64 = 1 << 4;
     const P_MAX_SIZE: i64 = 1 << 5;
@@ -2416,7 +2396,6 @@ fn updatesizehints(mut c: NonNull<Client>, globals: &Globals) {
 
     let mut size: MaybeUninit<XSizeHints> = MaybeUninit::uninit();
     let mut msize = 0i64;
-    let c = unsafe { c.as_mut() };
 
     let hint_result = unsafe {
         XGetWMNormalHints(
@@ -2476,7 +2455,7 @@ fn updatesizehints(mut c: NonNull<Client>, globals: &Globals) {
 }
 
 fn applysizehints(
-    c: NonNull<Client>,
+    c: &mut Client,
     x: &mut i32,
     y: &mut i32,
     w: &mut i32,
@@ -2484,9 +2463,11 @@ fn applysizehints(
     interact: bool,
     globals: &Globals,
 ) -> bool {
-    let c_nn = c;
-    let c = unsafe { c.as_ref() };
-    let m = unsafe { c.mon.as_ref() };
+    // Read the monitor fields up front before any mutation of c.
+    let (m_wx, m_wy, m_ww, m_wh, _m_sellt, m_lt_has_arrange) = unsafe {
+        let m = c.mon.as_ref();
+        (m.wx, m.wy, m.ww, m.wh, m.sellt as usize, m.lt[m.sellt as usize].arrange.is_none())
+    };
 
     *w = 1.max(*w);
     *h = 1.max(*h);
@@ -2504,17 +2485,17 @@ fn applysizehints(
             *y = 0
         }
     } else {
-        if *x >= m.wx + m.ww {
-            *x = m.wx + m.ww - c.width();
+        if *x >= m_wx + m_ww {
+            *x = m_wx + m_ww - c.width();
         }
-        if *y >= m.wy + m.wh {
-            *y = m.wy + m.wh - c.height();
+        if *y >= m_wy + m_wh {
+            *y = m_wy + m_wh - c.height();
         }
-        if *x + *w + 2 * c.bw <= m.wx {
-            *x = m.wx;
+        if *x + *w + 2 * c.bw <= m_wx {
+            *x = m_wx;
         }
-        if *y + *h + 2 * c.bw <= m.wy {
-            *y = m.wy;
+        if *y + *h + 2 * c.bw <= m_wy {
+            *y = m_wy;
         }
     }
     if *h < globals.bh {
@@ -2523,9 +2504,10 @@ fn applysizehints(
     if *w < globals.bh {
         *w = globals.bh;
     }
-    if config::RESIZEHINTS || c.isfloating || m.lt[m.sellt as usize].arrange.is_none() {
+    // m_lt_has_arrange reflects m.lt[sellt].arrange.is_none() read before any mutation
+    if config::RESIZEHINTS || c.isfloating || m_lt_has_arrange {
         if !c.hintsvalid {
-            updatesizehints(c_nn, globals)
+            updatesizehints(c, globals)
         }
         /* see last two sentences in ICCCM 4.1.2.3 */
         let baseismin = c.basew == c.minw && c.baseh == c.minh;
@@ -2568,9 +2550,9 @@ fn applysizehints(
     *x != c.x || *y != c.y || *w != c.w || *h != c.h
 }
 
-fn configure(c: NonNull<Client>, globals: &Globals) {
+fn configure(c: &Client, globals: &Globals) {
     const CONFIGURE_NOTIFY: i32 = 22;
-    let c_ref = unsafe { c.as_ref() };
+    let c_ref = c;
     let mut ce = XConfigureEvent {
         r#type: CONFIGURE_NOTIFY,
         serial: 0,
@@ -2597,7 +2579,7 @@ fn configure(c: NonNull<Client>, globals: &Globals) {
     };
 }
 
-fn getatomprop(c: NonNull<Client>, prop: Atom, globals: &Globals) -> Atom {
+fn getatomprop(c: &Client, prop: Atom, globals: &Globals) -> Atom {
     let mut format = 0i32;
     let mut nitems = 0u64;
     let mut dl = 0u64;
@@ -2609,7 +2591,7 @@ fn getatomprop(c: NonNull<Client>, prop: Atom, globals: &Globals) -> Atom {
     if unsafe {
         XGetWindowProperty(
             globals.dpy.as_ptr(),
-            c.as_ref().win,
+            c.win,
             prop,
             0,
             core::mem::size_of::<Atom>() as i64,
@@ -2626,13 +2608,13 @@ fn getatomprop(c: NonNull<Client>, prop: Atom, globals: &Globals) -> Atom {
         if nitems > 0 && format == 32 {
             atom = unsafe { *p.cast::<u64>() }
         }
-        unsafe { XFree(p as *mut c_void) };
+        unsafe { XFree(p.cast()) };
     }
 
     atom
 }
 
-fn resizeclient(mut c: NonNull<Client>, x: i32, y: i32, w: i32, h: i32, globals: &Globals) {
+fn resizeclient(c: &mut Client, x: i32, y: i32, w: i32, h: i32, globals: &Globals) {
     let mut wc = XWindowChanges {
         x,
         y,
@@ -2642,46 +2624,35 @@ fn resizeclient(mut c: NonNull<Client>, x: i32, y: i32, w: i32, h: i32, globals:
         sibling: 0,
         stack_mode: 0,
     };
-    {
-        let c = unsafe { c.as_mut() };
-        c.oldx = c.x;
-        c.x = wc.x;
-        c.oldy = c.y;
-        c.y = wc.y;
-        c.oldw = c.w;
-        c.w = wc.width;
-        c.oldh = c.h;
-        c.h = wc.height;
-        wc.border_width = c.bw;
-        unsafe {
-            XConfigureWindow(
-                globals.dpy.as_ptr(),
-                c.win,
-                CWX | CWY | CW_WIDTH | CW_HEIGHT | CW_BORDER_WIDTH,
-                &mut wc,
-            )
-        };
-    }
+    c.oldx = c.x;
+    c.x = wc.x;
+    c.oldy = c.y;
+    c.y = wc.y;
+    c.oldw = c.w;
+    c.w = wc.width;
+    c.oldh = c.h;
+    c.h = wc.height;
+    wc.border_width = c.bw;
+    unsafe {
+        XConfigureWindow(
+            globals.dpy.as_ptr(),
+            c.win,
+            CWX | CWY | CW_WIDTH | CW_HEIGHT | CW_BORDER_WIDTH,
+            &mut wc,
+        )
+    };
     configure(c, globals);
     unsafe { XSync(globals.dpy.as_ptr(), 0) };
 }
 
-fn resize(
-    c: NonNull<Client>,
-    mut x: i32,
-    mut y: i32,
-    mut w: i32,
-    mut h: i32,
-    interact: bool,
-    globals: &Globals,
-) {
+fn resize(c: &mut Client, mut x: i32, mut y: i32, mut w: i32, mut h: i32, interact: bool, globals: &Globals) {
     if applysizehints(c, &mut x, &mut y, &mut w, &mut h, interact, globals) {
         resizeclient(c, x, y, w, h, globals);
     }
 }
 
 fn showhide(c: Option<NonNull<Client>>, globals: &Globals) {
-    let Some(c) = c else { return };
+    let Some(mut c) = c else { return };
     let c_ref = unsafe { c.as_ref() };
     if is_visible(c) {
         /* show clients top down */
@@ -2692,7 +2663,8 @@ fn showhide(c: Option<NonNull<Client>>, globals: &Globals) {
             || c_ref.isfloating)
             && !c_ref.isfullscreen
         {
-            resize(c, c_ref.x, c_ref.y, c_ref.w, c_ref.h, false, globals);
+            let (x, y, w, h) = (c_ref.x, c_ref.y, c_ref.w, c_ref.h);
+            resize(unsafe { c.as_mut() }, x, y, w, h, false, globals);
         }
         showhide(c_ref.snext, globals);
     } else {
@@ -2701,7 +2673,7 @@ fn showhide(c: Option<NonNull<Client>>, globals: &Globals) {
     }
 }
 
-fn restack(m: NonNull<Monitor>, globals: &mut Globals) {
+fn restack(m: &Monitor, globals: &mut Globals) {
     const BELOW: i32 = 1;
     let mut wc: XWindowChanges = XWindowChanges {
         x: 0,
@@ -2716,7 +2688,6 @@ fn restack(m: NonNull<Monitor>, globals: &mut Globals) {
     let mut ev: XEvent = unsafe { core::mem::zeroed() };
 
     drawbar(m, globals);
-    let m = unsafe { m.as_ref() };
     if m.sel.is_none() {
         return;
     }
@@ -2759,20 +2730,19 @@ fn arrange(mut m: Option<NonNull<Monitor>>, globals: &mut Globals) {
         }
     }
 
-    if let Some(m) = m {
-        arrangemon(m, globals);
-        restack(m, globals);
+    if let Some(mut m) = m {
+        arrangemon(unsafe { m.as_mut() }, globals);
+        restack(unsafe { m.as_ref() }, globals);
     } else {
         m = Some(globals.mons);
-        while let Some(m_inner) = m {
-            arrangemon(m_inner, globals);
+        while let Some(mut m_inner) = m {
+            arrangemon(unsafe { m_inner.as_mut() }, globals);
             m = unsafe { m_inner.as_ref() }.next;
         }
     }
 }
 
-fn arrangemon(mut m: NonNull<Monitor>, globals: &mut Globals) {
-    let m = unsafe { m.as_mut() };
+fn arrangemon(m: &mut Monitor, globals: &mut Globals) {
     let symbol = CString::new(m.lt[m.sellt as usize].symbol).expect("valid CString");
     unsafe { libc::strncpy(m.ltsymbol.as_mut_ptr(), symbol.as_ptr(), m.ltsymbol.len()) };
     if let Some(f) = m.lt[m.sellt as usize].arrange {
@@ -2780,13 +2750,13 @@ fn arrangemon(mut m: NonNull<Monitor>, globals: &mut Globals) {
     }
 }
 
-fn setclientstate(c: NonNull<Client>, state: i64, globals: &Globals) {
+fn setclientstate(c: &Client, state: i64, globals: &Globals) {
     let data = [state, 0];
 
     unsafe {
         XChangeProperty(
             globals.dpy.as_ptr(),
-            c.as_ref().win,
+            c.win,
             globals.wmatom[WMAtom::State as usize],
             globals.wmatom[WMAtom::State as usize],
             32,
@@ -2797,14 +2767,12 @@ fn setclientstate(c: NonNull<Client>, state: i64, globals: &Globals) {
     }
 }
 
-fn setfullscreen(mut c: NonNull<Client>, fullscreen: bool, globals: &mut Globals) {
-    let c_ref = unsafe { c.as_mut() };
-
-    if fullscreen && !c_ref.isfullscreen {
+fn setfullscreen(c: &mut Client, fullscreen: bool, globals: &mut Globals) {
+    if fullscreen && !c.isfullscreen {
         unsafe {
             XChangeProperty(
                 globals.dpy.as_ptr(),
-                c_ref.win,
+                c.win,
                 globals.netatom[NetAtom::WMState as usize],
                 XA_ATOM,
                 32,
@@ -2813,25 +2781,22 @@ fn setfullscreen(mut c: NonNull<Client>, fullscreen: bool, globals: &mut Globals
                 1,
             )
         };
-        c_ref.isfullscreen = true;
-        c_ref.oldstate = c_ref.isfloating;
-        c_ref.oldbw = c_ref.bw;
-        c_ref.bw = 0;
-        c_ref.isfloating = true;
-        resizeclient(
-            c,
-            unsafe { c_ref.mon.as_ref() }.mx,
-            unsafe { c_ref.mon.as_ref() }.my,
-            unsafe { c_ref.mon.as_ref() }.mw,
-            unsafe { c_ref.mon.as_ref() }.mh,
-            globals,
-        );
-        unsafe { XRaiseWindow(globals.dpy.as_ptr(), c_ref.win) };
-    } else if !fullscreen && c_ref.isfullscreen {
+        c.isfullscreen = true;
+        c.oldstate = c.isfloating;
+        c.oldbw = c.bw;
+        c.bw = 0;
+        c.isfloating = true;
+        let (mx, my, mw, mh) = unsafe {
+            let m = c.mon.as_ref();
+            (m.mx, m.my, m.mw, m.mh)
+        };
+        resizeclient(c, mx, my, mw, mh, globals);
+        unsafe { XRaiseWindow(globals.dpy.as_ptr(), c.win) };
+    } else if !fullscreen && c.isfullscreen {
         unsafe {
             XChangeProperty(
                 globals.dpy.as_ptr(),
-                c_ref.win,
+                c.win,
                 globals.netatom[NetAtom::WMState as usize],
                 XA_ATOM,
                 32,
@@ -2840,24 +2805,25 @@ fn setfullscreen(mut c: NonNull<Client>, fullscreen: bool, globals: &mut Globals
                 0,
             )
         };
-        c_ref.isfullscreen = false;
-        c_ref.isfloating = c_ref.oldstate;
-        c_ref.bw = c_ref.oldbw;
-        c_ref.x = c_ref.oldx;
-        c_ref.y = c_ref.oldy;
-        c_ref.w = c_ref.oldw;
-        c_ref.h = c_ref.oldh;
-        resizeclient(c, c_ref.x, c_ref.y, c_ref.w, c_ref.h, globals);
-        arrange(Some(c_ref.mon), globals);
+        c.isfullscreen = false;
+        c.isfloating = c.oldstate;
+        c.bw = c.oldbw;
+        c.x = c.oldx;
+        c.y = c.oldy;
+        c.w = c.oldw;
+        c.h = c.oldh;
+        let (x, y, w, h, mon) = (c.x, c.y, c.w, c.h, c.mon);
+        resizeclient(c, x, y, w, h, globals);
+        arrange(Some(mon), globals);
     }
 }
 
 fn updatewindowtype(mut c: NonNull<Client>, globals: &mut Globals) {
-    let state: Atom = getatomprop(c, globals.netatom[NetAtom::WMState as usize], globals);
-    let wtype: Atom = getatomprop(c, globals.netatom[NetAtom::WMWindowType as usize], globals);
+    let state: Atom = getatomprop(unsafe { c.as_ref() }, globals.netatom[NetAtom::WMState as usize], globals);
+    let wtype: Atom = getatomprop(unsafe { c.as_ref() }, globals.netatom[NetAtom::WMWindowType as usize], globals);
 
     if state == globals.netatom[NetAtom::WMFullscreen as usize] {
-        setfullscreen(c, true, globals)
+        setfullscreen(unsafe { c.as_mut() }, true, globals)
     }
     if wtype == globals.netatom[NetAtom::WMWindowTypeDialog as usize] {
         unsafe { c.as_mut().isfloating = true };
@@ -2906,7 +2872,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
 
     let c_ref = unsafe { c.as_mut() };
 
-    updatetitle(c, globals);
+    updatetitle(c_ref, globals);
 
     if unsafe { XGetTransientForHint(globals.dpy.as_ptr(), w, &mut trans) } != 0
         && let Some(t) = wintoclient(trans, globals)
@@ -2916,7 +2882,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
         c_ref.tags = t_ref.tags;
     } else {
         c_ref.mon = globals.selmon;
-        applyrules(c, globals);
+        applyrules(c_ref, globals);
     }
 
     if c_ref.x + c_ref.width() > unsafe { c_ref.mon.as_ref().wx + c_ref.mon.as_ref().ww } {
@@ -2941,10 +2907,10 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
             globals.scheme[SchemeState::Norm as usize][drw::COL_BORDER].pixel,
         )
     };
-    configure(c, globals); /* propagates border_width, if size doesn't change */
+    configure(c_ref, globals); /* propagates border_width, if size doesn't change */
     updatewindowtype(c, globals);
-    updatesizehints(c, globals);
-    updatewmhints(c, globals);
+    updatesizehints(c_ref, globals);
+    updatewmhints(c_ref, globals);
     unsafe {
         XSelectInput(
             globals.dpy.as_ptr(),
@@ -2952,7 +2918,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
             ENTER_WINDOW_MASK | FOCUS_CHANGE_MASK | PROPERTY_CHANGE_MASK | STRUCTURE_NOTIFY_MASK,
         )
     };
-    grabbuttons(c, false, globals);
+    grabbuttons(c_ref, false, globals);
     if !unsafe { c.as_ref() }.isfloating {
         unsafe { c.as_mut().oldstate = trans != 0 || c.as_ref().isfixed };
         unsafe { c.as_mut().isfloating = c.as_ref().oldstate };
@@ -2984,7 +2950,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
             c.as_ref().h as u32,
         ); /* some windows require this */
     }
-    setclientstate(c, NORMAL_STATE as i64, globals);
+    setclientstate(c_ref, NORMAL_STATE as i64, globals);
     if unsafe { c.as_ref() }.mon == globals.selmon {
         unfocus(unsafe { globals.selmon.as_ref() }.sel, false, globals);
     }
@@ -3051,14 +3017,14 @@ fn unmanage(c: NonNull<Client>, destroyed: bool, globals: &mut Globals) {
                 c.as_ref().win,
             );
         }
-        setclientstate(c, WITHDRAWN_STATE as i64, globals);
+        setclientstate(unsafe { c.as_ref() }, WITHDRAWN_STATE as i64, globals);
         unsafe {
             XSync(globals.dpy.as_ptr(), 0);
             XSetErrorHandler(xerror);
             XUngrabServer(globals.dpy.as_ptr());
         }
     }
-    //TODO double check this;
+
     unsafe {
         let _ = Box::from_raw(c.as_ptr());
     }
@@ -3087,7 +3053,6 @@ fn scan(globals: &mut Globals) {
     const IS_VIEWABLE: i32 = 2;
     const ICONIC_STATE: i64 = 3;
 
-    //TODO: turn win into slice if n != 0.
     if unsafe {
         XQueryTree(
             globals.dpy.as_ptr(),
@@ -3099,31 +3064,25 @@ fn scan(globals: &mut Globals) {
         )
     } != 0
     {
-        for i in 0..num {
-            if unsafe { XGetWindowAttributes(globals.dpy.as_ptr(), *wins.add(i as usize), &mut wa) }
-                == 0
+        for i in 0..num as usize {
+            if unsafe { XGetWindowAttributes(globals.dpy.as_ptr(), *wins.add(i), &mut wa) } == 0
                 || wa.override_redirect != 0
-                || unsafe {
-                    XGetTransientForHint(globals.dpy.as_ptr(), *wins.add(i as usize), &mut d1)
-                } != 0
+                || unsafe { XGetTransientForHint(globals.dpy.as_ptr(), *wins.add(i), &mut d1) } != 0
             {
                 continue;
             }
             if wa.map_state == IS_VIEWABLE
-                || getstate(unsafe { *wins.add(i as usize) }, globals) == ICONIC_STATE
+                || getstate(unsafe { *wins.add(i) }, globals) == ICONIC_STATE
             {
-                manage(unsafe { *wins.add(i as usize) }, &wa, globals);
+                manage(unsafe { *wins.add(i) }, &wa, globals);
             }
         }
-        for i in 0..num {
+        for i in 0..num as usize {
             /* now the transients */
-            if unsafe { XGetWindowAttributes(globals.dpy.as_ptr(), *wins.add(i as usize), &mut wa) }
-                == 0
-            {
+            if unsafe { XGetWindowAttributes(globals.dpy.as_ptr(), *wins.add(i), &mut wa) } == 0 {
                 continue;
             }
-            if unsafe { XGetTransientForHint(globals.dpy.as_ptr(), *wins.add(i as usize), &mut d1) }
-                != 0
+            if unsafe { XGetTransientForHint(globals.dpy.as_ptr(), *wins.add(i), &mut d1) } != 0
                 && (wa.map_state == IS_VIEWABLE
                     || getstate(unsafe { *wins.add(i as usize) }, globals) == ICONIC_STATE)
             {
@@ -3131,7 +3090,7 @@ fn scan(globals: &mut Globals) {
             }
         }
         if !wins.is_null() {
-            unsafe { XFree(wins as *mut c_void) };
+            unsafe { XFree(wins.cast()) };
         }
     }
 }
@@ -3152,7 +3111,6 @@ fn setup(dpy: NonNull<Display>) -> Globals {
     let sw = unsafe { default_width(dpy.as_ptr(), screen) };
     let sh = unsafe { default_height(dpy.as_ptr(), screen) };
     let root = unsafe { root_window(dpy.as_ptr(), screen) };
-    //TODO: in cleanup run box::from_raw to recover Box<Drw>, swap DRW with null_ptr;
 
     let mut drw = Drw::new(dpy, screen, root, sw as u32, sh as u32);
     drw.fontset_create(config::FONTS);
@@ -3318,6 +3276,16 @@ fn setup(dpy: NonNull<Display>) -> Globals {
     globals
 }
 
+// Cleanup deallocates everything:
+//   - Clients:  each unmanage() calls Box::from_raw on the Client allocation.
+//   - Monitors: each cleanupmon() calls Box::from_raw on the Monitor allocation.
+//   - Cursors:  cur_free() calls XFreeCursor for each Cur.
+//   - Schemes:  scm_free() calls XftColorFree for each Clr; the Rc<[Clr]> then drops.
+//   - Fonts:    drop(drw) triggers Drw::drop → Box::from_raw(first Fnt) → Fnt::drop
+//               which recursively drops every node via its `next` field, calling
+//               XftFontClose + optional FcPatternDestroy on each.
+//   - Drw:      Drw::drop frees the pixmap and GC.
+//   - X state:  XDestroyWindow, XSync, XSetInputFocus, XDeleteProperty handled below.
 fn cleanup(mut globals: Globals) -> *mut Display {
     let a = Arg::Ui(!0);
     const EMPTY_LAYOUT: Layout = Layout {

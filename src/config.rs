@@ -32,7 +32,6 @@ pub const TAGS: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 //Rules
 pub const RULES: &[Rule] = &[
-    /* class      instance    title       tags mask     isfloating   monitor */
     Rule {
         class: "Gimp",
         instance: "",
@@ -76,7 +75,7 @@ pub const LAYOUTS: &[Layout] = &[
 /* key definitions */
 pub const MODKEY: u32 = MOD1_MASK;
 
-pub const DEMENUCMD: &[&str] = &[
+pub const DMENUCMD: &[&str] = &[
     "dmenu_run",
     "-m",
     "PLACEHOLDER",
@@ -99,7 +98,7 @@ pub const KEYS: &[Key] = &[
         r#mod: MODKEY,
         keysym: XK_p,
         func: Some(crate::spawn),
-        arg: crate::Arg::Command(DEMENUCMD),
+        arg: crate::Arg::Command(DMENUCMD),
     },
     Key {
         r#mod: MODKEY | SHIFT_MASK,
