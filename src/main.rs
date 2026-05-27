@@ -371,7 +371,7 @@ fn monocle(m: &mut Monitor, globals: &mut Globals) {
             false,
             globals,
         );
-        c = nexttiled(c);
+        c = nexttiled(unsafe { c_inner.as_ref() }.next);
     }
 }
 
@@ -473,17 +473,17 @@ fn setlayout(arg: &Arg, globals: &mut Globals) {
     let Arg::Layout(layout) = *arg else {
         unreachable!("invalid argument for setlayout function")
     };
-    if layout.is_none() {
-        unsafe { globals.selmon.as_mut() }.sellt ^= 1;
-    }
-    if let Some(l) = layout {
-        if core::ptr::eq(
+    let should_toggle = layout.map_or(true, |l| {
+        !core::ptr::eq(
             l,
             unsafe { globals.selmon.as_ref() }.lt
                 [unsafe { globals.selmon.as_ref() }.sellt as usize],
-        ) {
-            unsafe { globals.selmon.as_mut() }.sellt ^= 1;
-        }
+        )
+    });
+    if should_toggle {
+        unsafe { globals.selmon.as_mut() }.sellt ^= 1;
+    }
+    if let Some(l) = layout {
         (unsafe { globals.selmon.as_mut() }.lt)
             [unsafe { globals.selmon.as_ref() }.sellt as usize] = l;
     }
@@ -668,7 +668,6 @@ fn killclient(_arg: &Arg, globals: &mut Globals) {
             XUngrabServer(globals.dpy.as_ptr());
         }
     }
-    todo!()
 }
 
 fn focusmon(arg: &Arg, globals: &mut Globals) {
@@ -1050,15 +1049,15 @@ fn clientmessage(ev: &mut XEvent, globals: &mut Globals) {
                 && !unsafe { c.as_ref()}.isfullscreen ),
                 globals,
             );
-        } else if cme.message_type == globals.netatom[NetAtom::ActiveWindow as usize]
-            && (unsafe { globals.selmon.as_ref().sel }.is_none()
-                || c != unsafe { globals.selmon.as_ref() }
-                    .sel
-                    .expect("early termination"))
-            && !unsafe { c.as_ref() }.isurgent
-        {
-            seturgent(c, true, globals);
         }
+    } else if cme.message_type == globals.netatom[NetAtom::ActiveWindow as usize]
+        && (unsafe { globals.selmon.as_ref().sel }.is_none()
+            || c != unsafe { globals.selmon.as_ref() }
+                .sel
+                .expect("early termination"))
+        && !unsafe { c.as_ref() }.isurgent
+    {
+        seturgent(c, true, globals);
     }
 }
 
@@ -1099,7 +1098,7 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
             if (c_ref.y + c_ref.h) > m.my + m.mh && c_ref.isfloating {
                 c_ref.y = m.my + (m.mh / 2 - c_ref.height() / 2); /* center in y direction */
             }
-            if (vm & (CWX | CWY)) != 0 && !(vm & (CW_WIDTH | CW_HEIGHT)) != 0
+            if (vm & (CWX | CWY)) != 0 && (vm & (CW_WIDTH | CW_HEIGHT)) == 0
             {
                 configure(c, globals);
             }
@@ -1860,7 +1859,6 @@ fn updatenumlockmask(globals: &mut Globals) {
     globals.numlockmask = 0;
     let modmap = unsafe { XGetModifierMapping(globals.dpy.as_ptr()) };
 
-    dbg!("!");
     for i in 0..8 {
         for j in 0..unsafe { &*modmap }.max_keypermod {
             if unsafe {
@@ -2295,7 +2293,7 @@ fn getstate(w: Window, globals: &Globals) -> i64 {
     {
         return -1;
     }
-    if n != 0 && format == -32 {
+    if n != 0 && format == 32 {
         result = unsafe { *p.cast::<i64>() };
     }
     unsafe { XFree(p as *mut c_void) };
@@ -3411,7 +3409,7 @@ fn cleanupmon(mon: NonNull<Monitor>, globals: &mut Globals) -> bool {
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
 
-    if args.len() == 2 && args[1] != "-v" {
+    if args.len() == 2 && args[1] == "-v" {
         die(&format!("dwm-{}", VERSION));
     } else if args.len() != 1 {
         die("usage: dwm [-v]");
