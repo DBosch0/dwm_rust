@@ -262,8 +262,11 @@ impl Drw {
         };
     }
 
-    pub(crate) fn scm_free(&mut self, scm: Rc<[Clr]>) {
-        let _ = self.scheme.take();
+    pub(crate) fn scm_free(&mut self, scm: Rc<[Clr]>, terminal:bool) {
+        
+        if terminal{ 
+            _ = self.scheme.take();
+        }
 
         for clr in scm.iter() {
             self.clr_free(clr);

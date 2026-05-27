@@ -1,30 +1,35 @@
 #![allow(dead_code)]
 use crate::{
-    Button, ClickState, Key, Layout, Rule,
+    Button, ClickState, Key, Layout, ResourceConfig, ResourceVal, ResourceValConfig, Rule,
     external_functions::{
         BUTTON1, BUTTON2, BUTTON3, CONTROL_MASK, MOD1_MASK, SHIFT_MASK, keycodes::*,
     },
 };
 
 /* appearance */
-pub const BORDERPX: u32 = 1; /* border pixel of windows */
-pub const SNAP: u32 = 32; /* snap pixel */
-pub const SHOWBAR: bool = true; /* false means no bar */
-pub const TOPBAR: bool = true; /* false means bottom bar */
+pub const BORDER_PX_DEFAULT: u32 = 1; /* border pixel of windows */
+pub const SNAP_DEFAULT: u32 = 32; /* snap pixel */
+pub const SHOW_BAR_DEFAULT: bool = true; /* false means no bar */
+pub const TOP_BAR_DEFAULT: bool = true; /* false means bottom bar */
 pub const FONTS: &[&str] = &[
     "monospace:size=10",
     "NotoColorEmoji:pixelsize=10:antialias=true:autohint=true",
 ];
 pub const DMENUFONT: &str = "monospace:size=10";
-pub const COL_GRAY1: &str = "#222222";
-pub const COL_GRAY2: &str = "#444444";
-pub const COL_GRAY3: &str = "#bbbbbb";
-pub const COL_GRAY4: &str = "#eeeeee";
-pub const COL_CYAN: &str = "#005577";
+pub const NORM_BG_COLOR_DEFAULT: &str = "#222222";
+pub const NORM_BORDER_COLOR_DEFAULT: &str = "#444444";
+pub const NORM_FG_COLOR_DEFAULT: &str = "#bbbbbb";
+pub const SEL_FG_COLOR_DEFAULT: &str = "#eeeeee";
+pub const SEL_BORDER_COLOR_DEFAULT: &str = "#770000";
+pub const SEL_BG_COLOR_DEFAULT: &str = "#005577";
+
+// Must be the names of the color variables, not the variables themselves.
+// Will be loaded dynamically at runtime. If using pywall to set Xresouces
+// those colors will be loaded instead of the defaults above.
 pub const COLORS: &[[&str; 3]] = &[
     /*fg        bg         border   */
-    [COL_GRAY3, COL_GRAY1, COL_GRAY2], // SchemNorm (0)
-    [COL_GRAY4, COL_CYAN, COL_CYAN],   // SchemeSel (1)
+    ["NORM_FG_COLOR", "NORM_BG_COLOR", "NORM_BORDER_COLOR"], // SchemNorm (0)
+    ["SEL_FG_COLOR", "SEL_BG_COLOR", "SEL_BORDER_COLOR"],    // SchemeSel (1)
 ];
 
 //Tagging
@@ -51,11 +56,11 @@ pub const RULES: &[Rule] = &[
 ];
 
 //layout(s)
-pub const MFACT: f32 = 0.55; /* factor of master area size [0.05..0.95] */
-pub const NMASTER: i32 = 1; /* number of clients in master area */
-pub const RESIZEHINTS: bool = true; /* true means respect size hints in tiled resizals */
-pub const LOCKFULLSCREEN: bool = true; /* true will force focus on the fullscreen window */
-pub const REFRESHRATE: i32 = 120; /* refresh rate (per second) for client move/resize */
+pub const M_FACT_DEFAULT: f32 = 0.55; /* factor of master area size [0.05..0.95] */
+pub const N_MASTER_DEFAULT: u32 = 1; /* number of clients in master area */
+pub const RESIZE_HINTS_DEFAULT: bool = true; /* true means respect size hints in tiled resizals */
+pub const LOCK_FULLSCREEN: bool = true; /* true will force focus on the fullscreen window */
+pub const REFRESH_RATE: u32 = 120; /* refresh rate (per second) for client move/resize */
 
 pub const LAYOUTS: &[Layout] = &[
     Layout {
@@ -75,23 +80,98 @@ pub const LAYOUTS: &[Layout] = &[
 /* key definitions */
 pub const MODKEY: u32 = MOD1_MASK;
 
+//Underscored values will be replaced with dynmically loaded XResources
 pub const DMENUCMD: &[&str] = &[
     "dmenu_run",
     "-m",
-    "PLACEHOLDER",
+    "__DMENU_MONITOR_PLACEHOLDER",
     "-fn",
     DMENUFONT,
     "-nb",
-    COL_GRAY1,
+    "__NORM_BG_COLOR",
     "-nf",
-    COL_GRAY3,
+    "__NORM_FG_COLOR",
     "-sb",
-    COL_CYAN,
+    "__SEL_BORDER_COLOR",
     "-sf",
-    COL_GRAY4,
+    "__SEL_FG_COLOR",
 ];
 
 pub const TERMCD: &[&str] = &["st"];
+
+pub const RESOURCE_MAPPING: &[ResourceConfig] = &[
+    ResourceConfig {
+        name: "NORM_BORDER_COLOR",
+        x_resource_name: "color0",
+        default_value: ResourceValConfig::String(NORM_BORDER_COLOR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "SEL_BORDER_COLOR",
+        x_resource_name: "color8",
+        default_value: ResourceValConfig::String(SEL_BORDER_COLOR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "NORM_BG_COLOR",
+        x_resource_name: "color0",
+        default_value: ResourceValConfig::String(NORM_BG_COLOR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "NORM_FG_COLOR",
+        x_resource_name: "color4",
+        default_value: ResourceValConfig::String(NORM_FG_COLOR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "SEL_FG_COLOR",
+        x_resource_name: "color0",
+        default_value: ResourceValConfig::String(SEL_FG_COLOR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "SEL_BG_COLOR",
+        x_resource_name: "color4",
+        default_value: ResourceValConfig::String(SEL_BG_COLOR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "BORDER_PX",
+        x_resource_name: "borderpx",
+        default_value: ResourceValConfig::Integer(BORDER_PX_DEFAULT),
+    },
+    ResourceConfig {
+        name: "SNAP",
+        x_resource_name: "snap",
+        default_value: ResourceValConfig::Integer(SNAP_DEFAULT),
+    },
+    ResourceConfig {
+        name: "SHOW_BAR",
+        x_resource_name: "showbar",
+        default_value: ResourceValConfig::Bool(SHOW_BAR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "TOP_BAR",
+        x_resource_name: "topbar",
+        default_value: ResourceValConfig::Bool(TOP_BAR_DEFAULT),
+    },
+    ResourceConfig {
+        name: "N_MASTER",
+        x_resource_name: "nmaster",
+        default_value: ResourceValConfig::Integer(N_MASTER_DEFAULT),
+    },
+    ResourceConfig {
+        name: "RESIZE_HINTS",
+        x_resource_name: "resizehints",
+        default_value: ResourceValConfig::Bool(RESIZE_HINTS_DEFAULT),
+    },
+    ResourceConfig {
+        name: "M_FACT",
+        x_resource_name: "mfact",
+        default_value: ResourceValConfig::Float(M_FACT_DEFAULT),
+    },
+    // ["GAPPIH","gappih"],
+    // ["GAPPIV","gappiv"],
+    // ["GAPPOH","gappoh"],
+    // ["GAPPOV","gappov"],
+    // ["SWALLOW_FLOATING","swallowfloating"],
+    // ["SMART_GAPS","smartgaps"  ],
+];
 
 pub const KEYS: &[Key] = &[
     Key {
@@ -236,6 +316,12 @@ pub const KEYS: &[Key] = &[
         r#mod: MODKEY | SHIFT_MASK,
         keysym: XK_q,
         func: Some(crate::quit),
+        arg: crate::Arg::I(0),
+    },
+    Key {
+        r#mod: MODKEY,
+        keysym: XK_F5,
+        func: Some(crate::xrdb),
         arg: crate::Arg::I(0),
     },
     // The '1' key

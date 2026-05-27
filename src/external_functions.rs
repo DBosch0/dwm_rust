@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::ffi::{c_char, c_int, c_long, c_ulong, c_uint, c_void};
+use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 
 #[link(name = "X11")]
 unsafe extern "C" {
@@ -224,7 +224,11 @@ unsafe extern "C" {
         cursor: Cursor,
     ) -> i32;
 
-    pub(crate) fn XSetWindowBorder(display: *mut Display, w: Window, border_pixel: c_ulong) -> c_int;
+    pub(crate) fn XSetWindowBorder(
+        display: *mut Display,
+        w: Window,
+        border_pixel: c_ulong,
+    ) -> c_int;
     pub(crate) fn XSetInputFocus(
         display: *mut Display,
         focus: Window,
@@ -369,6 +373,18 @@ unsafe extern "C" {
     pub(crate) fn XUngrabServer(display: *mut Display) -> c_int;
     pub(crate) fn XDestroyWindow(display: *mut Display, w: Window) -> c_int;
     pub(crate) fn XUnmapWindow(display: *mut Display, w: Window) -> c_int;
+
+    pub(crate) fn XrmGetResource(
+        database: XrmDatabase,
+        str_name: *const c_char,
+        str_class: *const c_char,
+        str_type_return: *mut *mut c_char,
+        value_return: *mut XrmValue,
+    ) -> c_int;
+
+    pub(crate) fn XResourceManagerString(display: *mut Display) -> *const c_char;
+    pub(crate) fn XrmGetStringDatabase(data: *const c_char) -> XrmDatabase;
+    pub(crate) fn XrmInitialize();
 }
 
 #[link(name = "Xinerama")]
@@ -398,7 +414,11 @@ unsafe extern "C" {
 
 #[link(name = "Xft")]
 unsafe extern "C" {
-    pub(crate) fn XftFontOpenName(dpy: *mut Display, screen: c_int, name: *const c_char) -> *mut XftFont;
+    pub(crate) fn XftFontOpenName(
+        dpy: *mut Display,
+        screen: c_int,
+        name: *const c_char,
+    ) -> *mut XftFont;
     pub(crate) fn XftFontOpenPattern(dpy: *mut Display, pattern: *mut FcPattern) -> *mut XftFont;
     pub(crate) fn XftColorAllocName(
         dpy: *mut Display,
@@ -510,6 +530,7 @@ pub(crate) type GC = *mut _XGC;
 pub(crate) enum _XGC {}
 pub(crate) enum _XPrivate {}
 pub(crate) enum _XrmHashBucketRec {}
+pub(crate) type XrmDatabase = *mut _XrmHashBucketRec;
 
 #[repr(C)]
 struct _XPrivDisplay {
@@ -519,7 +540,7 @@ struct _XPrivDisplay {
     pub(crate) private2: i32,
     pub(crate) proto_major_version: i32, /* major version of server's X protocol */
     pub(crate) proto_minor_version: i32, /* minor version of servers X protocol */
-    pub(crate) vendor: *mut c_char,       /* vendor of the server hardware */
+    pub(crate) vendor: *mut c_char,      /* vendor of the server hardware */
     pub(crate) private3: XID,
     pub(crate) private4: XID,
     pub(crate) private5: XID,
@@ -535,7 +556,7 @@ struct _XPrivDisplay {
     pub(crate) release: i32, /* release of the server */
     pub(crate) private9: *mut _XPrivate,
     pub(crate) private10: *mut _XPrivate,
-    pub(crate) qlen: i32,              /* Length of input event queue */
+    pub(crate) qlen: i32,                  /* Length of input event queue */
     pub(crate) last_request_read: c_ulong, /* seq number of last event read */
     pub(crate) request: c_ulong,           /* sequence number of last request. */
     pub(crate) private11: XPointer,
@@ -546,10 +567,10 @@ struct _XPrivDisplay {
     pub(crate) db: *mut _XrmHashBucketRec,
     pub(crate) private15: fn(display: *mut _XDisplay) -> i32,
     pub(crate) display_name: *mut c_char, /* "host:display" string used on this connect*/
-    pub(crate) default_screen: i32,   /* default screen for operations */
-    pub(crate) nscreens: i32,         /* number of screens on this server*/
-    pub(crate) screens: *mut Screen,  /* pointer to list of screens */
-    pub(crate) motion_buffer: c_ulong, /* size of motion buffer */
+    pub(crate) default_screen: i32,       /* default screen for operations */
+    pub(crate) nscreens: i32,             /* number of screens on this server*/
+    pub(crate) screens: *mut Screen,      /* pointer to list of screens */
+    pub(crate) motion_buffer: c_ulong,    /* size of motion buffer */
     pub(crate) private16: c_ulong,
     pub(crate) min_keycode: i32, /* minimum defined keycode */
     pub(crate) max_keycode: i32, /* maximum defined keycode */
@@ -620,7 +641,7 @@ pub(crate) union XClientMessageEventData {
 #[derive(Clone, Copy)]
 pub(crate) struct XButtonEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: c_ulong,        /* # of last request processed by server */
+    pub(crate) serial: c_ulong,       /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* "event" window it is reported relative to */
@@ -673,7 +694,7 @@ pub(crate) struct XDestroyWindowEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XCrossingEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: c_ulong,        /* # of last request processed by server */
+    pub(crate) serial: c_ulong,       /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* "event" window reported relative to */
@@ -715,7 +736,7 @@ pub(crate) struct XExposeEvent {
 #[derive(Clone, Copy)]
 pub(crate) struct XFocusChangeEvent {
     pub(crate) r#type: i32,           /* FocusIn or FocusOut */
-    pub(crate) serial: c_ulong,        /* # of last request processed by server */
+    pub(crate) serial: c_ulong,       /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* window of event */
@@ -734,7 +755,7 @@ type XFocusOutEvent = XFocusChangeEvent;
 #[derive(Clone, Copy)]
 pub(crate) struct XKeyEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: c_ulong,        /* # of last request processed by server */
+    pub(crate) serial: c_ulong,       /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* "event" window it is reported relative to */
@@ -757,7 +778,7 @@ type XKeyReleasedEvent = XKeyEvent;
 #[derive(Clone, Copy)]
 pub(crate) struct XMappingEvent {
     pub(crate) r#type: i32,           /* of event */
-    pub(crate) serial: c_ulong,        /* # of last request processed by server */
+    pub(crate) serial: c_ulong,       /* # of last request processed by server */
     pub(crate) send_event: i32,       /* true if this came from a SendEvent request */
     pub(crate) display: *mut Display, /* Display the event was read from */
     pub(crate) window: Window,        /* unused */
@@ -862,7 +883,7 @@ pub(crate) struct Screen {
     pub(crate) cmap: Colormap,           /* default color map */
     pub(crate) white_pixel: c_ulong,
     pub(crate) black_pixel: c_ulong, /* White and Black pixel values */
-    pub(crate) max_maps: i32,    /* max and min color maps */
+    pub(crate) max_maps: i32,        /* max and min color maps */
     pub(crate) min_maps: i32,
     pub(crate) backing_store: i32, /* Never, WhenMapped, Always */
     pub(crate) save_unders: i32,
@@ -887,7 +908,7 @@ pub(crate) struct Visual {
     ext_data: *mut XExtData, /* hook for extension to hang data */
     visualid: VisualID,      /* visual id of this visual */
     class: i32,              /* class of screen (monochrome, etc.) */
-    red_mask: c_ulong,   /* mask values */
+    red_mask: c_ulong,       /* mask values */
     green_mask: c_ulong,
     blue_mask: c_ulong,
     bits_per_rgb: i32, /* log base 2 of distinct color values */
@@ -1004,16 +1025,16 @@ pub(crate) type XErrorHandler =
 #[derive(Debug)]
 pub(crate) struct XSetWindowAttributes {
     pub(crate) background_pixmap: Pixmap, /* background or None or ParentRelative */
-    pub(crate) background_pixel: c_ulong,  /* background pixel */
-    pub(crate) border_pixmap: Pixmap,      /* border of the window */
-    pub(crate) border_pixel: c_ulong,      /* border pixel value */
-    pub(crate) bit_gravity: i32,           /* one of bit gravity values */
-    pub(crate) win_gravity: i32,           /* one of the window gravity values */
-    pub(crate) backing_store: i32,         /* NotUseful, WhenMapped, Always */
-    pub(crate) backing_planes: c_ulong,    /* planes to be preserved if possible */
-    pub(crate) backing_pixel: c_ulong,     /* value to use in restoring planes */
-    pub(crate) save_under: i32,            /* should bits under be saved? (popups) */
-    pub(crate) event_mask: c_long,         /* set of events that should be saved */
+    pub(crate) background_pixel: c_ulong, /* background pixel */
+    pub(crate) border_pixmap: Pixmap,     /* border of the window */
+    pub(crate) border_pixel: c_ulong,     /* border pixel value */
+    pub(crate) bit_gravity: i32,          /* one of bit gravity values */
+    pub(crate) win_gravity: i32,          /* one of the window gravity values */
+    pub(crate) backing_store: i32,        /* NotUseful, WhenMapped, Always */
+    pub(crate) backing_planes: c_ulong,   /* planes to be preserved if possible */
+    pub(crate) backing_pixel: c_ulong,    /* value to use in restoring planes */
+    pub(crate) save_under: i32,           /* should bits under be saved? (popups) */
+    pub(crate) event_mask: c_long,        /* set of events that should be saved */
     pub(crate) do_not_propogate_mask: c_long, /* set of events that should not propagate */
     pub(crate) override_redirect: i32,    /* boolean value for override-redirect */
     pub(crate) colormap: Colormap,        /* color map to be associated with window */
@@ -1029,7 +1050,7 @@ pub(crate) struct XClassHint {
 #[repr(C)]
 pub(crate) struct XWMHints {
     pub(crate) flags: c_long, /* marks which fields in this structure are defined */
-    pub(crate) input: i32,   /* does this application rely on the window manager to get keyboard input? */
+    pub(crate) input: i32, /* does this application rely on the window manager to get keyboard input? */
     pub(crate) initial_state: i32, /* see below */
     pub(crate) icon_pixmap: Pixmap, /* pixmap to be used as icon */
     pub(crate) icon_window: Window, /* window to be used as icon */
@@ -1046,25 +1067,25 @@ pub(crate) struct XWindowAttributes {
     pub(crate) y: i32,
     pub(crate) width: i32, /* width and height of window */
     pub(crate) height: i32,
-    pub(crate) border_width: i32,          /* border width of window */
-    pub(crate) depth: i32,                 /* depth of window */
-    pub(crate) visual: *mut Visual,        /* the associated visual structure */
-    pub(crate) root: Window,               /* root of screen containing window */
-    pub(crate) class: i32,                 /* InputOutput, InputOnly*/
-    pub(crate) bit_gravity: i32,              /* one of bit gravity values */
-    pub(crate) win_gravity: i32,             /* one of the window gravity values */
-    pub(crate) backing_store: i32,           /* NotUseful, WhenMapped, Always */
-    pub(crate) backing_planes: c_ulong,      /* planes to be preserved if possible */
-    pub(crate) backing_pixel: c_ulong,       /* value to be used when restoring planes */
-    pub(crate) save_under: i32,              /* boolean, should bits under be saved? */
-    pub(crate) colormap: Colormap,           /* color map to be associated with window */
-    pub(crate) map_installed: i32,           /* boolean, is color map currently installed*/
-    pub(crate) map_state: i32,               /* IsUnmapped, IsUnviewable, IsViewable */
-    pub(crate) all_event_mask: c_long,       /* set of events all people have interest in*/
-    pub(crate) your_event_mask: c_long,      /* my event mask */
+    pub(crate) border_width: i32,       /* border width of window */
+    pub(crate) depth: i32,              /* depth of window */
+    pub(crate) visual: *mut Visual,     /* the associated visual structure */
+    pub(crate) root: Window,            /* root of screen containing window */
+    pub(crate) class: i32,              /* InputOutput, InputOnly*/
+    pub(crate) bit_gravity: i32,        /* one of bit gravity values */
+    pub(crate) win_gravity: i32,        /* one of the window gravity values */
+    pub(crate) backing_store: i32,      /* NotUseful, WhenMapped, Always */
+    pub(crate) backing_planes: c_ulong, /* planes to be preserved if possible */
+    pub(crate) backing_pixel: c_ulong,  /* value to be used when restoring planes */
+    pub(crate) save_under: i32,         /* boolean, should bits under be saved? */
+    pub(crate) colormap: Colormap,      /* color map to be associated with window */
+    pub(crate) map_installed: i32,      /* boolean, is color map currently installed*/
+    pub(crate) map_state: i32,          /* IsUnmapped, IsUnviewable, IsViewable */
+    pub(crate) all_event_mask: c_long,  /* set of events all people have interest in*/
+    pub(crate) your_event_mask: c_long, /* my event mask */
     pub(crate) do_not_propogate_mask: c_long, /* set of events that should not propagate */
-    pub(crate) override_redirect: i32,     /* boolean value for override-redirect */
-    pub(crate) screen: *mut Screen,        /* back pointer to correct screen */
+    pub(crate) override_redirect: i32,  /* boolean value for override-redirect */
+    pub(crate) screen: *mut Screen,     /* back pointer to correct screen */
 }
 
 #[repr(C)]
@@ -1107,8 +1128,14 @@ pub(crate) struct XSizeHints {
 
 #[repr(C)]
 pub(crate) struct XSizeHintsAspect {
-    pub(crate) x: i32, /* numerator */
-    pub(crate) y: i32, /* denominator */
+    pub(crate) x: c_int, /* numerator */
+    pub(crate) y: c_int, /* denominator */
+}
+
+#[repr(C)]
+pub(crate) struct XrmValue {
+    pub(crate) size: c_uint,
+    pub(crate) addr: XPointer,
 }
 
 pub(crate) const REVERT_TO_POINTER_ROOT: i32 = 1;
@@ -1471,6 +1498,52 @@ pub(crate) mod keycodes {
     pub(crate) const XK_Sys_Req: u64 = 0xff15;
     pub(crate) const XK_Escape: u64 = 0xff1b; /* U+001B ESCAPE */
     pub(crate) const XK_Delete: u64 = 0xffff; /* U+007F DELETE */
+
+    pub(crate) const XK_F1: u64 = 0xffbe;
+    pub(crate) const XK_F2: u64 = 0xffbf;
+    pub(crate) const XK_F3: u64 = 0xffc0;
+    pub(crate) const XK_F4: u64 = 0xffc1;
+    pub(crate) const XK_F5: u64 = 0xffc2;
+    pub(crate) const XK_F6: u64 = 0xffc3;
+    pub(crate) const XK_F7: u64 = 0xffc4;
+    pub(crate) const XK_F8: u64 = 0xffc5;
+    pub(crate) const XK_F9: u64 = 0xffc6;
+    pub(crate) const XK_F10: u64 = 0xffc7;
+    pub(crate) const XK_F11: u64 = 0xffc8;
+    pub(crate) const XK_F12: u64 = 0xffc9;
+
+    pub(crate) const XF86XK_Standby: u64 = 0x1008ff10; /* System into standby mode   */
+    pub(crate) const XF86XK_AudioLowerVolume: u64 = 0x1008ff11; /* Volume control down        */
+    pub(crate) const XF86XK_AudioMute: u64 = 0x1008ff12; /* Mute sound from the system */
+    pub(crate) const XF86XK_AudioRaiseVolume: u64 = 0x1008ff13; /* Volume control up          */
+    pub(crate) const XF86XK_AudioPlay: u64 = 0x1008ff14; /* Start playing of audio >   */
+    pub(crate) const XF86XK_AudioStop: u64 = 0x1008ff15; /* Stop playing audio         */
+    pub(crate) const XF86XK_AudioPrev: u64 = 0x1008ff16; /* Previous track             */
+    pub(crate) const XF86XK_AudioNext: u64 = 0x1008ff17; /* Next track                 */
+    pub(crate) const XF86XK_HomePage: u64 = 0x1008ff18; /* Display user's home page   */
+    pub(crate) const XF86XK_Mail: u64 = 0x1008ff19; /* Invoke user's mail program */
+    pub(crate) const XF86XK_Start: u64 = 0x1008ff1a; /* Start application          */
+    pub(crate) const XF86XK_Search: u64 = 0x1008ff1b; /* Search                     */
+    pub(crate) const XF86XK_AudioRecord: u64 = 0x1008ff1c; /* Record audio application   */
+    pub(crate) const XF86XK_AudioPause: u64 = 0x1008ff31; /* Pause audio playing        */
+    pub(crate) const XF86XK_AudioRewind: u64 = 0x1008ff3e; /* "rewind" audio track        */
+    pub(crate) const XF86XK_AudioForward: u64 = 0x1008ff97; /* fast-forward audio track    */
+    pub(crate) const XF86XK_AudioMedia: u64 = 0x1008ff32; /* Launch media collection app */
+    pub(crate) const XF86XK_AudioMicMute: u64 = 0x1008ffb2; /* Mute the Mic from the system */
+    pub(crate) const XF86XK_Calculator: u64 = 0x1008ff1d; /* Invoke calculator program  */
+    pub(crate) const XF86XK_Sleep: u64 = 0x1008ff2f; /* Put system to sleep        */
+    pub(crate) const XF86XK_WWW: u64 = 0x1008ff2e; /* Invoke web browser         */
+    pub(crate) const XF86XK_DOS: u64 = 0x1008ff5a; /* Launch DOS (emulation)      */
+    pub(crate) const XF86XK_ScreenSaver: u64 = 0x1008ff2d; /* Invoke screensaver         */
+    pub(crate) const XF86XK_TaskPane: u64 = 0x1008ff7f; /* Show tasks */
+    pub(crate) const XF86XK_MyComputer: u64 = 0x1008ff33; /* Display "My Computer" window */
+    pub(crate) const XF86XK_Battery: u64 = 0x1008ff93; /* Display battery information */
+    pub(crate) const XF86XK_Launch1: u64 = 0x1008ff41; /* Launch Application          */
+    pub(crate) const XF86XK_TouchpadToggle: u64 = 0x1008ffa9; /* Toggle between touchpad/trackstick */
+    pub(crate) const XF86XK_TouchpadOn: u64 = 0x1008ffb0; /* The touchpad got switched on */
+    pub(crate) const XF86XK_TouchpadOff: u64 = 0x1008ffb1; /* The touchpad got switched off */
+    pub(crate) const XF86XK_MonBrightnessUp: u64 = 0x1008ff02; /* Monitor/panel brightness */
+    pub(crate) const XF86XK_MonBrightnessDown: u64 = 0x1008ff03; /* Monitor/panel brightness */
 }
 
 //button names:

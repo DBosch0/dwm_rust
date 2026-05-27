@@ -1,9 +1,13 @@
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::io::{Write, stderr};
 use std::mem::MaybeUninit;
+use std::os::raw::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use libc::{snprintf, strncmp, strncpy, strtof, strtoul};
 
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
@@ -136,6 +140,42 @@ struct Layout {
     arrange: Option<fn(&mut Monitor, &mut Globals)>,
 }
 
+#[derive(Debug)]
+enum ResourceVal {
+    String(String),
+    Integer(u32),
+    Bool(bool),
+    Float(f32),
+}
+
+#[derive(Debug)]
+enum ResourceValConfig {
+    String(&'static str),
+    Integer(u32),
+    Bool(bool),
+    Float(f32),
+}
+
+impl ResourceValConfig {
+    fn to_resource_val(&self) -> ResourceVal {
+        match self {
+            ResourceValConfig::String(s) => ResourceVal::String((*s).to_owned()),
+            ResourceValConfig::Integer(i) => ResourceVal::Integer(*i),
+            ResourceValConfig::Bool(b) => ResourceVal::Bool(*b),
+            ResourceValConfig::Float(f) => ResourceVal::Float(*f),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ResourceConfig {
+    name: &'static str,
+    x_resource_name: &'static str,
+    default_value: ResourceValConfig,
+}
+
+type Resources = HashMap<&'static str, ResourceVal>;
+
 struct Monitor {
     ltsymbol: [i8; 16],
     mfact: f32,
@@ -196,6 +236,42 @@ fn text_w(x: *const i8, globals: &mut Globals) -> i32 {
 fn cleanmask(mask: u32, globals: &Globals) -> u32 {
     mask & !(globals.numlockmask | LOCK_MASK)
         & (SHIFT_MASK | CONTROL_MASK | MOD1_MASK | MOD2_MASK | MOD3_MASK | MOD4_MASK | MOD5_MASK)
+}
+
+#[inline(always)]
+fn load_resource_int(name: &str, globals: &Globals) -> u32 {
+    let ResourceVal::Integer(u) = globals
+        .resources
+        .get(name)
+        .expect(&format!("{} is in the resouces map", name))
+    else {
+        unreachable!("invalid type of {} variable in Resources map", name);
+    };
+    *u
+}
+
+#[inline(always)]
+fn load_resource_bool(name: &str, globals: &Globals) -> bool {
+    let ResourceVal::Bool(b) = globals
+        .resources
+        .get(name)
+        .expect(&format!("{} is in the resouces map", name))
+    else {
+        unreachable!("invalid type of {} variable in Resources map", name);
+    };
+    *b
+}
+
+#[inline(always)]
+fn load_resource_float(name: &str, globals: &Globals) -> f32 {
+    let ResourceVal::Float(f) = globals
+        .resources
+        .get(name)
+        .expect(&format!("{} is in the resouces map", name))
+    else {
+        unreachable!("invalid type of {} variable in Resources map", name);
+    };
+    *f
 }
 
 //
@@ -271,6 +347,7 @@ struct Globals {
     root: Window,
     wmcheckwin: Window,
     last_motion_mon: Option<NonNull<Monitor>>,
+    resources: Resources,
 }
 
 fn nexttiled(mut c: Option<NonNull<Client>>) -> Option<NonNull<Client>> {
@@ -458,8 +535,18 @@ fn spawn(arg: &Arg, globals: &mut Globals) {
     let cs_arr: Vec<CString> = arr
         .iter()
         .map(|&elem| {
-            let s = if elem == "PLACEHOLDER" && arr == &config::DMENUCMD {
-                format!("{}", mon_num)
+            let s = if let Some(elem_stripped) = elem.strip_prefix("__") {
+                if elem_stripped == "DMENU_MONITOR_PLACEHOLDER" {
+                    format!("{}", mon_num)
+                } else {
+                    let Some(e) = globals.resources.get(elem_stripped) else {
+                        die!("Tried to load placeholder not in the resources map");
+                    };
+                    let ResourceVal::String(s) = e else {
+                        die!("Non String Resouce Values are not currently implemented for `spawn`")
+                    };
+                    s.clone()
+                }
             } else {
                 elem.to_string()
             };
@@ -561,6 +648,10 @@ fn togglefloating(_arg: &Arg, globals: &mut Globals) {
     arrange(Some(globals.selmon), globals);
 }
 
+fn togglefullscreen(arg: &Arg, globals: &mut Globals) {
+    todo!()
+}
+
 fn focusstack(arg: &Arg, globals: &mut Globals) {
     let mut c: Option<NonNull<Client>> = None;
 
@@ -568,7 +659,7 @@ fn focusstack(arg: &Arg, globals: &mut Globals) {
         return;
     };
     let sel = unsafe { sel.as_ref() };
-    if sel.isfullscreen && config::LOCKFULLSCREEN {
+    if sel.isfullscreen && config::LOCK_FULLSCREEN {
         return;
     }
     let Arg::I(ai) = arg else {
@@ -673,12 +764,107 @@ fn zoom(_arg: &Arg, globals: &mut Globals) {
     pop(c_inner, globals)
 }
 
+fn xrdb(_arg: &Arg, globals: &mut Globals) {
+    globals.resources = load_xresources();
+
+    for (i, pallette) in config::COLORS.iter().enumerate() {
+        let mut pallette_iter = pallette.iter().map(|name| {
+            let ResourceVal::String(color) = globals
+                .resources
+                .get(name)
+                .expect("Color is present in the resources map")
+            else {
+                die!("Color is not of type string in resoures map")
+            };
+            color.as_str()
+        });
+        let pallette: [&str; config::COLORS[0].len()] = std::array::from_fn(|_| {
+            pallette_iter.next().expect(
+                "we know by construction that there exists a constant number of values in the map",
+            )
+        });
+        let mut scm = globals.drw.scm_create(&pallette);
+        std::mem::swap(&mut scm, &mut globals.scheme[i]);
+        globals.drw.scm_free(scm, false);
+    }
+}
+
+fn resource_load(db: XrmDatabase, name: &str, value: &mut ResourceVal) {
+    let mut fullname: [i8; 256] = [0; 256];
+    let mut r#type: *mut i8 = core::ptr::null_mut();
+    let mut ret: XrmValue = unsafe { core::mem::zeroed() };
+
+    let format = CString::new(format!("{}.{}", "dwm", name)).expect("valid CString");
+    unsafe { snprintf(fullname.as_mut_ptr(), fullname.len(), format.as_ptr()) };
+    fullname[fullname.len() - 1] = b'\0' as i8;
+
+    unsafe { XrmGetResource(db, fullname.as_ptr(), c"*".as_ptr(), &mut r#type, &mut ret) };
+    if !(ret.addr.is_null() || unsafe { strncmp(c"String".as_ptr(), r#type, 64) } != 0) {
+        match value {
+            ResourceVal::String(s) => {
+                *s = unsafe { CStr::from_ptr(ret.addr) }
+                    .to_str()
+                    .expect("valid &str")
+                    .to_owned()
+            }
+            ResourceVal::Integer(u) => {
+                *u = unsafe { strtoul(ret.addr, core::ptr::null_mut(), 10) } as u32;
+            }
+            ResourceVal::Bool(b) => {
+                *b = unsafe { strtoul(ret.addr, core::ptr::null_mut(), 10) } != 0;
+            }
+            ResourceVal::Float(f) => {
+                *f = unsafe { strtof(ret.addr, core::ptr::null_mut()) };
+            }
+        }
+    }
+    //TODO maybe necessary
+    if !r#type.is_null() {
+        unsafe { XFree(r#type as *mut c_void) };
+    }
+}
+
+fn load_xresources() -> Resources {
+    let mut resources: Resources = HashMap::new();
+
+    let display = unsafe { XOpenDisplay(core::ptr::null_mut()) };
+    let resm = unsafe { XResourceManagerString(display) };
+
+    let db = if !resm.is_null() {
+        unsafe { XrmGetStringDatabase(resm) }
+    } else {
+        core::ptr::null_mut()
+    };
+
+    for ResourceConfig {
+        name,
+        x_resource_name,
+        default_value,
+    } in config::RESOURCE_MAPPING
+    {
+        let value = default_value.to_resource_val();
+        let mut entry = resources.entry(name).or_insert(value);
+
+        // see if we can load an updated value from the xresouces;
+        if !db.is_null() {
+            resource_load(db, x_resource_name, &mut entry);
+        }
+    }
+
+    unsafe { XCloseDisplay(display) };
+    resources
+}
+
 fn killclient(_arg: &Arg, globals: &mut Globals) {
     const DESTROY_ALL: i32 = 0;
     let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
         return;
     };
-    if !sendevent(unsafe { sel.as_ref() }, globals.wmatom[WMAtom::Delete as usize], globals) {
+    if !sendevent(
+        unsafe { sel.as_ref() },
+        globals.wmatom[WMAtom::Delete as usize],
+        globals,
+    ) {
         unsafe {
             XGrabServer(globals.dpy.as_ptr());
             XSetErrorHandler(xerrordummy);
@@ -775,32 +961,35 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
                 (HANDLER[unsafe { ev.r#type } as usize].expect("valid function"))(&mut ev, globals);
             }
             MOTION_NOTIFY => {
-                if unsafe { ev.xmotion }.time - lasttime <= 1000 / config::REFRESHRATE as u64 {
+                if unsafe { ev.xmotion }.time - lasttime <= 1000 / config::REFRESH_RATE as u64 {
                     continue;
                 }
                 lasttime = unsafe { ev.xmotion.time };
 
                 let mut nx = ocx + (unsafe { ev.xmotion.x } - x);
                 let mut ny = ocy + (unsafe { ev.xmotion.y } - y);
-                if (unsafe { globals.selmon.as_ref().wx } - nx).abs() < config::SNAP as i32 {
+
+                let snap = load_resource_int("SNAP", globals);
+
+                if (unsafe { globals.selmon.as_ref().wx } - nx).abs() < snap as i32 {
                     nx = unsafe { globals.selmon.as_ref().wx };
                 } else if ((unsafe { globals.selmon.as_ref().wx }
                     + unsafe { globals.selmon.as_ref().ww })
                     - (nx + unsafe { c.as_ref().width() }))
                 .abs()
-                    < config::SNAP as i32
+                    < snap as i32
                 {
                     nx = unsafe { globals.selmon.as_ref().wx }
                         + unsafe { globals.selmon.as_ref().ww }
                         - unsafe { c.as_ref().width() };
                 }
-                if (unsafe { globals.selmon.as_ref().wy } - ny).abs() < config::SNAP as i32 {
+                if (unsafe { globals.selmon.as_ref().wy } - ny).abs() < snap as i32 {
                     ny = unsafe { globals.selmon.as_ref().wy };
                 } else if ((unsafe { globals.selmon.as_ref().wy }
                     + unsafe { globals.selmon.as_ref().wh })
                     - (ny + unsafe { c.as_ref().height() }))
                 .abs()
-                    < config::SNAP as i32
+                    < snap as i32
                 {
                     ny = unsafe { globals.selmon.as_ref().wy }
                         + unsafe { globals.selmon.as_ref().wh }
@@ -811,8 +1000,8 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
                         [unsafe { globals.selmon.as_ref().sellt } as usize]
                         .arrange
                         .is_some()
-                    && ((nx - unsafe { c.as_ref().x }).abs() > config::SNAP as i32
-                        || (ny - unsafe { c.as_ref().y }).abs() > config::SNAP as i32)
+                    && ((nx - unsafe { c.as_ref().x }).abs() > snap as i32
+                        || (ny - unsafe { c.as_ref().y }).abs() > snap as i32)
                 {
                     togglefloating(&Arg::I(0), globals);
                 }
@@ -905,13 +1094,16 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
                 (HANDLER[unsafe { ev.r#type } as usize].expect("valid function"))(&mut ev, globals);
             }
             MOTION_NOTIFY => {
-                if unsafe { ev.xmotion.time } - lasttime <= 1000 / config::REFRESHRATE as u64 {
+                if unsafe { ev.xmotion.time } - lasttime <= 1000 / config::REFRESH_RATE as u64 {
                     continue;
                 }
                 lasttime = unsafe { ev.xmotion.time };
 
                 let nw = 1.max(unsafe { ev.xmotion.x } - ocx - 2 * cr.bw + 1);
                 let nh = 1.max(unsafe { ev.xmotion.y } - ocy - 2 * cr.bw + 1);
+
+                let snap = load_resource_int("SNAP", globals);
+
                 if unsafe { cr.mon.as_ref().wx } + nw >= unsafe { globals.selmon.as_ref().wx }
                     && unsafe { cr.mon.as_ref().wx } + nw
                         <= unsafe { globals.selmon.as_ref().wx }
@@ -925,8 +1117,7 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
                         [unsafe { globals.selmon.as_ref().sellt } as usize]
                         .arrange
                         .is_some()
-                    && ((nw - cr.w).abs() > config::SNAP as i32
-                        || (nh - cr.h).abs() > config::SNAP as i32)
+                    && ((nw - cr.w).abs() > snap as i32 || (nh - cr.h).abs() > snap as i32)
                 {
                     togglefloating(&Arg::I(0), globals);
                 }
@@ -1170,7 +1361,11 @@ fn configurenotify(ev: &mut XEvent, globals: &mut Globals) {
                     if unsafe { c_inner.as_ref() }.isfullscreen {
                         resizeclient(
                             unsafe { c_inner.as_mut() },
-                            m_inner.mx, m_inner.my, m_inner.mw, m_inner.mh, globals,
+                            m_inner.mx,
+                            m_inner.my,
+                            m_inner.mw,
+                            m_inner.mh,
+                            globals,
                         );
                     }
                     c = unsafe { c_inner.as_ref() }.next
@@ -1412,7 +1607,7 @@ fn checkotherwm(dpy: NonNull<Display>) {
     }
 }
 
-fn createmon() -> NonNull<Monitor> {
+fn createmon(globals: &Globals) -> NonNull<Monitor> {
     let mut ltsym: [i8; 16] = [0; 16];
     for (i, b) in config::LAYOUTS[0]
         .symbol
@@ -1426,8 +1621,8 @@ fn createmon() -> NonNull<Monitor> {
 
     let m: Box<Monitor> = Box::new(Monitor {
         ltsymbol: ltsym,
-        mfact: config::MFACT,
-        nmaster: config::NMASTER,
+        mfact: load_resource_float("M_FACT", globals),
+        nmaster: load_resource_int("N_MASTER", globals) as i32,
         num: 0,
         by: 0,
         mx: 0,
@@ -1441,8 +1636,8 @@ fn createmon() -> NonNull<Monitor> {
         seltags: 0,
         sellt: 0,
         tagset: [1, 1],
-        showbar: config::SHOWBAR,
-        topbar: config::TOPBAR,
+        showbar: load_resource_bool("SHOW_BAR", globals),
+        topbar: load_resource_bool("TOP_BAR", globals),
         clients: None,
         sel: None,
         stack: None,
@@ -1578,7 +1773,7 @@ fn updategeom(globals: &mut Globals) -> bool {
 
     // We are in initialization
     if !globals.running {
-        globals.mons = createmon();
+        globals.mons = createmon(globals);
     }
 
     let mons_ref = unsafe { globals.mons.as_mut() };
@@ -1996,7 +2191,11 @@ fn seturgent(c: &mut Client, urg: bool, globals: &Globals) {
     const X_URGENCY_HINT: i64 = 1 << 8;
 
     let f = unsafe { &*wmh }.flags;
-    unsafe { &mut *wmh }.flags = if urg { f | X_URGENCY_HINT } else { f & !X_URGENCY_HINT };
+    unsafe { &mut *wmh }.flags = if urg {
+        f | X_URGENCY_HINT
+    } else {
+        f & !X_URGENCY_HINT
+    };
     unsafe { XSetWMHints(globals.dpy.as_ptr(), c.win, wmh) };
     unsafe { XFree(wmh.cast()) };
 }
@@ -2072,15 +2271,7 @@ fn sendevent(c: &Client, proto: Atom, globals: &Globals) -> bool {
                 },
             },
         };
-        unsafe {
-            XSendEvent(
-                globals.dpy.as_ptr(),
-                c.win,
-                0,
-                NO_EVENT_MASK,
-                &mut ev,
-            )
-        };
+        unsafe { XSendEvent(globals.dpy.as_ptr(), c.win, 0, NO_EVENT_MASK, &mut ev) };
     }
 
     exists
@@ -2119,7 +2310,9 @@ fn sendmon(mut c: NonNull<Client>, m: NonNull<Monitor>, globals: &mut Globals) {
 fn dirtomon(dir: i32, globals: &Globals) -> NonNull<Monitor> {
     if dir > 0 {
         // Next monitor, wrapping around to the first if selmon is the last.
-        unsafe { globals.selmon.as_ref() }.next.unwrap_or(globals.mons)
+        unsafe { globals.selmon.as_ref() }
+            .next
+            .unwrap_or(globals.mons)
     } else if globals.selmon == globals.mons {
         // Walk to the last monitor in the list.
         let mut m = globals.mons;
@@ -2473,7 +2666,14 @@ fn applysizehints(
     // Read the monitor fields up front before any mutation of c.
     let (m_wx, m_wy, m_ww, m_wh, _m_sellt, m_lt_has_arrange) = unsafe {
         let m = c.mon.as_ref();
-        (m.wx, m.wy, m.ww, m.wh, m.sellt as usize, m.lt[m.sellt as usize].arrange.is_none())
+        (
+            m.wx,
+            m.wy,
+            m.ww,
+            m.wh,
+            m.sellt as usize,
+            m.lt[m.sellt as usize].arrange.is_none(),
+        )
     };
 
     *w = 1.max(*w);
@@ -2512,7 +2712,7 @@ fn applysizehints(
         *w = globals.bh;
     }
     // m_lt_has_arrange reflects m.lt[sellt].arrange.is_none() read before any mutation
-    if config::RESIZEHINTS || c.isfloating || m_lt_has_arrange {
+    if load_resource_bool("RESIZE_HINTS", globals) || c.isfloating || m_lt_has_arrange {
         if !c.hintsvalid {
             updatesizehints(c, globals)
         }
@@ -2652,7 +2852,15 @@ fn resizeclient(c: &mut Client, x: i32, y: i32, w: i32, h: i32, globals: &Global
     unsafe { XSync(globals.dpy.as_ptr(), 0) };
 }
 
-fn resize(c: &mut Client, mut x: i32, mut y: i32, mut w: i32, mut h: i32, interact: bool, globals: &Globals) {
+fn resize(
+    c: &mut Client,
+    mut x: i32,
+    mut y: i32,
+    mut w: i32,
+    mut h: i32,
+    interact: bool,
+    globals: &Globals,
+) {
     if applysizehints(c, &mut x, &mut y, &mut w, &mut h, interact, globals) {
         resizeclient(c, x, y, w, h, globals);
     }
@@ -2826,8 +3034,16 @@ fn setfullscreen(c: &mut Client, fullscreen: bool, globals: &mut Globals) {
 }
 
 fn updatewindowtype(mut c: NonNull<Client>, globals: &mut Globals) {
-    let state: Atom = getatomprop(unsafe { c.as_ref() }, globals.netatom[NetAtom::WMState as usize], globals);
-    let wtype: Atom = getatomprop(unsafe { c.as_ref() }, globals.netatom[NetAtom::WMWindowType as usize], globals);
+    let state: Atom = getatomprop(
+        unsafe { c.as_ref() },
+        globals.netatom[NetAtom::WMState as usize],
+        globals,
+    );
+    let wtype: Atom = getatomprop(
+        unsafe { c.as_ref() },
+        globals.netatom[NetAtom::WMWindowType as usize],
+        globals,
+    );
 
     if state == globals.netatom[NetAtom::WMFullscreen as usize] {
         setfullscreen(unsafe { c.as_mut() }, true, globals)
@@ -2900,7 +3116,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
     }
     c_ref.x = c_ref.x.max(unsafe { c_ref.mon.as_ref() }.wx);
     c_ref.y = c_ref.y.max(unsafe { c_ref.mon.as_ref() }.wy);
-    c_ref.bw = config::BORDERPX as i32;
+    c_ref.bw = load_resource_int("BORDER_PX", globals) as i32;
 
     wc.border_width = c_ref.bw;
 
@@ -3102,7 +3318,7 @@ fn scan(globals: &mut Globals) {
     }
 }
 
-fn setup(dpy: NonNull<Display>) -> Globals {
+fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
     /* do not transform children into zombies when they terminate */
     let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&mut sa.sa_mask) };
@@ -3149,6 +3365,7 @@ fn setup(dpy: NonNull<Display>) -> Globals {
         root,
         wmcheckwin: 0,
         last_motion_mon: None,
+        resources,
     };
 
     updategeom(&mut globals);
@@ -3190,8 +3407,23 @@ fn setup(dpy: NonNull<Display>) -> Globals {
     globals.cursor[CursorState::Move as usize] = globals.drw.cur_create(XC_FLEUR);
 
     let mut scheme = Vec::new();
-    for i in 0..config::COLORS.len() {
-        let scm = globals.drw.scm_create(&config::COLORS[i]);
+    for pallette in config::COLORS {
+        let mut pallette_iter = pallette.iter().map(|name| {
+            let ResourceVal::String(color) = globals
+                .resources
+                .get(name)
+                .expect("Color is present in the resources map")
+            else {
+                die!("Color is not of type string in resoures map")
+            };
+            color.as_str()
+        });
+        let pallette: [&str; config::COLORS[0].len()] = std::array::from_fn(|_| {
+            pallette_iter.next().expect(
+                "we know by construction that there exists a constant number of values in the map",
+            )
+        });
+        let scm = globals.drw.scm_create(&pallette);
         scheme.push(scm);
     }
     globals.scheme = scheme.into_boxed_slice();
@@ -3337,7 +3569,7 @@ fn cleanup(mut globals: Globals) -> *mut Display {
         drw.cur_free(cur);
     }
     for scheme in scheme {
-        drw.scm_free(scheme);
+        drw.scm_free(scheme, true);
     }
     unsafe { XDestroyWindow(dpy.as_ptr(), wmcheckwin) };
     drop(drw);
@@ -3403,7 +3635,9 @@ fn main() {
     };
 
     checkotherwm(dpy);
-    let mut globals = setup(dpy);
+    unsafe { XrmInitialize() };
+    let resources = load_xresources();
+    let mut globals = setup(dpy, resources);
     scan(&mut globals);
     run(&mut globals);
     let dpy: *mut Display = cleanup(globals);
