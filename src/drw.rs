@@ -5,12 +5,17 @@ use std::{
     num::Wrapping,
     ptr::NonNull,
     rc::Rc,
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 use crate::{
     die,
     external_functions::*,
 };
+
+static NOMATCHES: [AtomicU32; 128] = [const { AtomicU32::new(0) }; 128];
+static ELLIPSIS_WIDTH: AtomicU32 = AtomicU32::new(0);
+static INVALID_WIDTH: AtomicU32 = AtomicU32::new(0);
 
 const UTF_INVALID: i64 = 0xFFFD;
 fn utf8decode(s_in: *const i8) -> (i32, i64, bool) {
@@ -347,10 +352,6 @@ impl Drw {
         let mut charexists = false;
         let mut overflow = false;
 
-        static mut NOMATCHES: [u32; 128] = [0; 128];
-        static mut ELLIPSIS_WIDTH: u32 = 0;
-        static mut INVALID_WIDTH: u32 = 0;
-
         const FC_CHARSET: &CStr = c"charset";
         const FC_SCALABLE: &CStr = c"scalable";
         const FCTRUE: i32 = 1;
@@ -401,12 +402,11 @@ impl Drw {
 
         usedfont = self.fonts.expect("checked above to be valid");
 
-        // dbg!("!!");
-        if unsafe { ELLIPSIS_WIDTH } == 0 && render {
-            unsafe { ELLIPSIS_WIDTH = self.fontset_getwidth(c"...".as_ptr()) };
+        if ELLIPSIS_WIDTH.load(Ordering::Relaxed) == 0 && render {
+            ELLIPSIS_WIDTH.store(self.fontset_getwidth(c"...".as_ptr()), Ordering::Relaxed);
         }
-        if unsafe { INVALID_WIDTH } == 0 && render {
-            unsafe { INVALID_WIDTH = self.fontset_getwidth(INVALID.as_ptr()) };
+        if INVALID_WIDTH.load(Ordering::Relaxed) == 0 && render {
+            INVALID_WIDTH.store(self.fontset_getwidth(INVALID.as_ptr()), Ordering::Relaxed);
         }
 
         loop {
@@ -431,7 +431,7 @@ impl Drw {
 
                     if charexists {
                         font_getexts(cf, text, utf8charlen, Some(&mut tmpw), None);
-                        if ew + unsafe { ELLIPSIS_WIDTH } <= w {
+                        if ew + ELLIPSIS_WIDTH.load(Ordering::Relaxed) <= w {
                             /* keep track where the ellipsis still fits */
                             ellipsis_x = x + ew as i32;
                             ellipsis_w = w - ew;
@@ -491,12 +491,12 @@ impl Drw {
                 w -= ew;
             }
 
-            if utf8err && (!render || unsafe { INVALID_WIDTH } < w) {
+            if utf8err && (!render || INVALID_WIDTH.load(Ordering::Relaxed) < w) {
                 if render {
                     self.text(x, y, w, h, 0, INVALID.as_ptr(), invert);
                 }
-                x += unsafe { INVALID_WIDTH } as i32;
-                w -= unsafe { INVALID_WIDTH };
+                x += INVALID_WIDTH.load(Ordering::Relaxed) as i32;
+                w -= INVALID_WIDTH.load(Ordering::Relaxed);
             }
 
             if render && overflow {
@@ -516,12 +516,12 @@ impl Drw {
                 hash = Wrapping(utf8codepoint as u32);
                 hash = ((hash >> 16) ^ hash) * Wrapping(0x21F0AAAD);
                 hash = ((hash >> 15) ^ hash) * Wrapping(0xD35A2D97);
-                h0 = ((hash.0 >> 15) ^ hash.0) % unsafe { NOMATCHES }.len() as u32;
-                h1 = (hash.0 >> 17) % unsafe { NOMATCHES }.len() as u32;
+                h0 = ((hash.0 >> 15) ^ hash.0) % NOMATCHES.len() as u32;
+                h1 = (hash.0 >> 17) % NOMATCHES.len() as u32;
 
                 /* avoid expensive XftFontMatch call when we know we won't find a match */
-                if unsafe { NOMATCHES }[h0 as usize] as i64 == utf8codepoint
-                    || unsafe { NOMATCHES }[h1 as usize] as i64 == utf8codepoint
+                if NOMATCHES[h0 as usize].load(Ordering::Relaxed) as i64 == utf8codepoint
+                    || NOMATCHES[h1 as usize].load(Ordering::Relaxed) as i64 == utf8codepoint
                 {
                     usedfont = if let Some(font) = self.fonts {
                         font
@@ -590,13 +590,12 @@ impl Drw {
                         }
                         usedfont = uf;
                     } else {
-                        unsafe {
-                            NOMATCHES[if NOMATCHES[h0 as usize] != 0 {
-                                h1 as usize
-                            } else {
-                                h0 as usize
-                            }] = utf8codepoint as u32;
+                        let idx = if NOMATCHES[h0 as usize].load(Ordering::Relaxed) != 0 {
+                            h1 as usize
+                        } else {
+                            h0 as usize
                         };
+                        NOMATCHES[idx].store(utf8codepoint as u32, Ordering::Relaxed);
                         usedfont = self.fonts.expect("known to be non-null");
                     }
                 }
