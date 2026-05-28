@@ -6,6 +6,8 @@ use crate::{
     },
 };
 
+pub const TERM_CLASS: &str = "St";
+
 /* appearance */
 pub const BORDER_PX_DEFAULT: u32 = 3; /* border pixel of windows */
 pub const SNAP_DEFAULT: u32 = 32; /* snap pixel */
@@ -22,12 +24,12 @@ pub const NORM_FG_COLOR_DEFAULT: &str = "#bbbbbb";
 pub const SEL_FG_COLOR_DEFAULT: &str = "#eeeeee";
 pub const SEL_BORDER_COLOR_DEFAULT: &str = "#770000";
 pub const SEL_BG_COLOR_DEFAULT: &str = "#005577";
-pub const GAPP_IH_DEFAULT: u32 = 20;
-pub const GAPP_IV_DEFAULT: u32 = 20;
-pub const GAPP_OH_DEFAULT: u32 = 20;
-pub const GAPP_OV_DEFAULT: u32 = 20;
-pub const SMART_GAPS_DEFAULT: bool = false;
-pub const FORCE_VSPLIT: bool = true; /* nrowgrid layout: force two clients to always split vertically */
+pub const GAPP_IH_DEFAULT: u32 = 20; /* horiz inner gap between windows */
+pub const GAPP_IV_DEFAULT: u32 = 20; /* vert inner gap between windows */
+pub const GAPP_OH_DEFAULT: u32 = 20; /* horiz outer gap between windows and screen edge */
+pub const GAPP_OV_DEFAULT: u32 = 20; /* vert outer gap between windows and screen edge */
+pub const SWALLOW_FLOATING_DEFAULT: bool = false; /* true means swallow floating windows by default */
+pub const SMART_GAPS_DEFAULT: bool = false; /* true means no outer gap when there is only one window */
 
 // Must be the names of the color variables, not the variables themselves.
 // Will be loaded dynamically at runtime. If using pywall to set Xresouces
@@ -42,6 +44,7 @@ pub const COLORS: &[[&str; 3]] = &[
 pub const TAGS: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 //Rules
+//TODO update rules;
 pub const RULES: &[Rule] = &[
     Rule {
         class: "Gimp",
@@ -49,14 +52,38 @@ pub const RULES: &[Rule] = &[
         title: "",
         tags: 0,
         isfloating: true,
+        isterminal: false,
+        noswallow: false,
         monitor: -1,
     },
     Rule {
-        class: "Firefox",
+        class: TERM_CLASS,
         instance: "",
         title: "",
-        tags: 1 << 8,
+        tags: 0,
         isfloating: false,
+        isterminal: true,
+        noswallow: false,
+        monitor: -1,
+    },
+    Rule {
+        class: "",
+        instance: "",
+        title: "Event Tester",
+        tags: 0,
+        isfloating: false,
+        isterminal: false,
+        noswallow: true,
+        monitor: -1,
+    },
+    Rule {
+        class: TERM_CLASS,
+        instance: "bg",
+        title: "",
+        tags: 1 << 7,
+        isfloating: false,
+        isterminal: true,
+        noswallow: false,
         monitor: -1,
     },
 ];
@@ -67,6 +94,7 @@ pub const N_MASTER_DEFAULT: u32 = 1; /* number of clients in master area */
 pub const RESIZE_HINTS_DEFAULT: bool = false; /* true means respect size hints in tiled resizals */
 pub const LOCK_FULLSCREEN: bool = true; /* true will force focus on the fullscreen window */
 pub const REFRESH_RATE: u32 = 120; /* refresh rate (per second) for client move/resize */
+pub const FORCE_VSPLIT: bool = true; /* nrowgrid layout: force two clients to always split vertically */
 
 pub const LAYOUTS: &[Layout] = &[
     Layout {
@@ -240,7 +268,11 @@ pub const RESOURCE_MAPPING: &[ResourceConfig] = &[
         x_resource_name: "smartgaps",
         default_value: ResourceValConfig::Bool(SMART_GAPS_DEFAULT),
     },
-    // ["SWALLOW_FLOATING","swallowfloating"],
+    ResourceConfig {
+        name: "SWALLOW_FLOATING",
+        x_resource_name: "swallowfloating",
+        default_value: ResourceValConfig::Bool(SWALLOW_FLOATING_DEFAULT),
+    },
 ];
 
 pub const KEYS: &[Key] = &[

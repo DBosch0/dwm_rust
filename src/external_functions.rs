@@ -390,6 +390,34 @@ unsafe extern "C" {
 #[link(name = "Xinerama")]
 unsafe extern "C" {}
 
+#[link(name = "xcb")]
+unsafe extern "C" {
+    pub(crate) fn xcb_res_query_client_ids(
+        c: *mut XcbConnectionT,
+        num_specs: u32,
+        specs: *const XcbResClientIdSpecT,
+    ) -> xcb_res_query_client_ids_cookie_t;
+
+    pub(crate) fn xcb_res_query_client_ids_reply(
+        c: *mut XcbConnectionT,
+        cookie: xcb_res_query_client_ids_cookie_t,
+        e: *mut *mut XcbGenericErrorT,
+    ) -> *mut xcb_res_query_client_ids_reply_t;
+
+    pub(crate) fn xcb_res_query_client_ids_ids_iterator(
+        r: *mut xcb_res_query_client_ids_reply_t,
+    ) -> xcb_res_client_id_value_iterator_t;
+
+    pub(crate) fn xcb_res_client_id_value_value(r: *mut xcb_res_client_id_value_t) -> *mut u32;
+    pub(crate) fn xcb_res_client_id_value_next(i: *mut xcb_res_client_id_value_iterator_t);
+}
+#[link(name = "X11-xcb")]
+unsafe extern "C" {
+    pub(crate) fn XGetXCBConnection(dpy: *mut Display) -> *mut XcbConnectionT;
+}
+#[link(name = "xcb-res")]
+unsafe extern "C" {}
+
 #[link(name = "fontconfig")]
 unsafe extern "C" {
     pub(crate) fn FcNameParse(name: *const FcChar8) -> *mut FcPattern;
@@ -531,6 +559,56 @@ pub(crate) enum _XGC {}
 pub(crate) enum _XPrivate {}
 pub(crate) enum _XrmHashBucketRec {}
 pub(crate) type XrmDatabase = *mut _XrmHashBucketRec;
+
+pub(crate) enum XcbConnectionT {}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct XcbResClientIdSpecT {
+    pub(crate) client: u32,
+    pub(crate) mask: u32,
+}
+
+#[repr(C)]
+pub(crate) struct XcbGenericErrorT {
+    pub(crate) response_type: u8, /*< Type of the response */
+    pub(crate) error_code: u8,    /*< Error code */
+    pub(crate) sequence: u16,     /*< Sequence number */
+    pub(crate) resource_id: u32,  /* < Resource ID for requests with side effects only */
+    pub(crate) minor_code: u16,   /* < Minor opcode of the failed request */
+    pub(crate) major_code: u8,    /* < Major opcode of the failed request */
+    pub(crate) pad0: u8,
+    pub(crate) pad: [u32; 5],      /*< Padding */
+    pub(crate) full_sequence: u32, /*< full sequence */
+}
+
+#[repr(C)]
+pub(crate) struct xcb_res_query_client_ids_cookie_t {
+    pub(crate) sequence: u32,
+}
+
+#[repr(C)]
+pub(crate) struct xcb_res_query_client_ids_reply_t {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    length: u32,
+    num_ids: u32,
+    pad1: [u8; 20],
+}
+
+#[repr(C)]
+pub(crate) struct xcb_res_client_id_value_t {
+    pub(crate) spec: XcbResClientIdSpecT,
+    pub(crate) length: u32,
+}
+
+#[repr(C)]
+pub(crate) struct xcb_res_client_id_value_iterator_t {
+    pub(crate) data: *mut xcb_res_client_id_value_t,
+    pub(crate) rem: i32,
+    pub(crate) index: i32,
+}
 
 #[repr(C)]
 struct _XPrivDisplay {

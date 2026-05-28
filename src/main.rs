@@ -9,6 +9,8 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use libc::pid_t;
+
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
 
@@ -116,9 +118,13 @@ struct Client {
     neverfocus: bool,
     oldstate: bool,
     isfullscreen: bool,
+    isterminal: bool,
+    noswallow: bool,
     issticky: bool,
+    pid: libc::pid_t,
     next: Option<NonNull<Client>>,
     snext: Option<NonNull<Client>>,
+    swallowing: Option<NonNull<Client>>,
     mon: NonNull<Monitor>,
     win: Window,
 }
@@ -218,6 +224,8 @@ struct Rule {
     title: &'static str,
     tags: u32,
     isfloating: bool,
+    isterminal: bool,
+    noswallow: bool,
     monitor: i32,
 }
 
@@ -357,6 +365,7 @@ struct Globals {
     wmcheckwin: Window,
     last_motion_mon: Option<NonNull<Monitor>>,
     resources: Resources,
+    xcon: NonNull<XcbConnectionT>,
 }
 
 fn nexttiled(mut c: Option<NonNull<Client>>) -> Option<NonNull<Client>> {
@@ -467,6 +476,113 @@ fn toggletag(arg: &Arg, globals: &mut Globals) {
             arrange(Some(globals.selmon), globals);
         }
     }
+}
+
+fn winpid(w: Window, globals: &Globals) -> libc::pid_t {
+    let mut result: libc::pid_t = 0;
+    const XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID: u32 = 2;
+
+    let mut spec = XcbResClientIdSpecT {
+        client: w as u32,
+        mask: XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID,
+    };
+
+    let mut e: *mut XcbGenericErrorT = core::ptr::null_mut();
+    let c: xcb_res_query_client_ids_cookie_t =
+        unsafe { xcb_res_query_client_ids(globals.xcon.as_ptr(), 1, &spec) };
+    let r: *mut xcb_res_query_client_ids_reply_t =
+        unsafe { xcb_res_query_client_ids_reply(globals.xcon.as_ptr(), c, &mut e) };
+
+    if r.is_null() {
+        return 0 as libc::pid_t;
+    }
+
+    let mut i: xcb_res_client_id_value_iterator_t =
+        unsafe { xcb_res_query_client_ids_ids_iterator(r) };
+    while i.rem != 0 {
+        spec = unsafe { &*i.data }.spec;
+        if spec.mask & XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID != 0 {
+            let t = unsafe { xcb_res_client_id_value_value(i.data) };
+            result = unsafe { *t } as i32;
+            break;
+        }
+        unsafe { xcb_res_client_id_value_next(&mut i) }
+    }
+
+    unsafe { libc::free(r as *mut c_void) };
+
+    if result == (-1) as libc::pid_t {
+        result = 0;
+    }
+
+    return result;
+}
+
+//TODO maybe rustify?
+fn getparentprocess(p: libc::pid_t) -> pid_t {
+    let v = 0u32;
+
+    // FILE *f;
+    let mut buf = [0i8; 256];
+    let cstr = CString::new(format!("/proc/{}/stat", p as u32)).expect("valid CString");
+    unsafe { libc::snprintf(buf.as_mut_ptr(), buf.len() - 1, cstr.as_ptr()) };
+
+    let f = unsafe { libc::fopen(buf.as_ptr(), c"r".as_ptr()) };
+    if f.is_null() {
+        return 0;
+    }
+
+    unsafe { libc::fscanf(f, c"%*u %*s %*c %u".as_ptr(), &v) };
+    unsafe { libc::fclose(f) };
+    v as libc::pid_t
+}
+
+fn isdescprocess(p: libc::pid_t, mut c: libc::pid_t) -> i32 {
+    while p != c && c != 0 {
+        c = getparentprocess(c);
+    }
+    c as i32
+}
+
+fn termforwin(w: NonNull<Client>, globals: &Globals) -> Option<NonNull<Client>> {
+    if unsafe { w.as_ref().pid } == 0 || unsafe { w.as_ref().isterminal } {
+        return None;
+    }
+
+    let mut m = Some(globals.mons);
+    while let Some(mi) = m {
+        let mut c = unsafe { mi.as_ref().clients };
+        while let Some(ci) = c {
+            if unsafe { ci.as_ref().isterminal }
+                && unsafe { ci.as_ref().swallowing.is_none() }
+                && unsafe { ci.as_ref().pid } != 0
+                && isdescprocess(unsafe { ci.as_ref().pid }, unsafe { w.as_ref().pid }) != 0
+            {
+                return c;
+            }
+            c = unsafe { ci.as_ref().next }
+        }
+        m = unsafe { mi.as_ref().next };
+    }
+
+    None
+}
+
+fn swallowingclient(w: Window, globals: &Globals) -> Option<NonNull<Client>> {
+    let mut m = Some(globals.mons);
+    while let Some(mi) = m {
+        let mut c = unsafe { mi.as_ref().clients };
+        while let Some(ci) = c {
+            if let Some(swallowing) = unsafe { ci.as_ref().swallowing }
+                && unsafe { swallowing.as_ref().win } == w
+            {
+                return c;
+            }
+            c = unsafe { ci.as_ref().next }
+        }
+        m = unsafe { mi.as_ref().next };
+    }
+    None
 }
 
 //NOTE: using libc and not `std::process` because setsid in `std::os::linux::process::CommandExt` is unstable.
@@ -1547,6 +1663,17 @@ fn destroynotify(ev: &mut XEvent, globals: &mut Globals) {
     let ev: &mut XDestroyWindowEvent = unsafe { &mut ev.xdestroywindow };
     if let Some(c) = wintoclient(ev.window, globals) {
         unmanage(c, true, globals);
+    } else if let Some(c) = swallowingclient(ev.window, globals) {
+        //TODO check this case.
+        unmanage(
+            unsafe {
+                c.as_ref()
+                    .swallowing
+                    .expect("should be Some in this cas if returned from swallowing client")
+            },
+            true,
+            globals,
+        );
     }
 }
 
@@ -2362,6 +2489,73 @@ fn attachstack(mut c: NonNull<Client>) {
     unsafe { c.as_mut().mon.as_mut().stack = Some(c) };
 }
 
+fn swallow(mut p: NonNull<Client>, mut c: NonNull<Client>, globals: &mut Globals) {
+    let c_ref = unsafe { c.as_mut() };
+    let p_ref = unsafe { p.as_mut() };
+    if c_ref.noswallow || c_ref.isterminal {
+        return;
+    }
+    if c_ref.noswallow && !load_resource_bool("SWALLOW_FLOATING", globals) && c_ref.isfloating {
+        return;
+    }
+
+    detach(c);
+    detachstack(c);
+
+    setclientstate(c_ref, WITHDRAWN_STATE as i64, globals);
+    unsafe { XUnmapWindow(globals.dpy.as_ptr(), p_ref.win) };
+
+    p_ref.swallowing = Some(c);
+    c_ref.mon = p_ref.mon;
+
+    let w = p_ref.win;
+    p_ref.win = c_ref.win;
+    c_ref.win = w;
+    updatetitle(p_ref, globals);
+    unsafe {
+        XMoveResizeWindow(
+            globals.dpy.as_ptr(),
+            p_ref.win,
+            p_ref.x,
+            p_ref.y,
+            p_ref.w as u32,
+            p_ref.h as u32,
+        )
+    };
+    arrange(Some(p_ref.mon), globals);
+    configure(p_ref, globals);
+    updateclientlist(globals);
+}
+
+fn unswallow(mut c: NonNull<Client>, globals: &mut Globals) {
+    let c_ref = unsafe { c.as_mut() };
+    let Some(swallowed) = c_ref.swallowing.take() else {
+        unreachable!("gave a client to unswallow that has not swallowed anything.")
+    };
+    c_ref.win = unsafe { swallowed.as_ref() }.win;
+    //Free the swallowed object, having set c.swallowing to None by take above.
+    let _ = unsafe { Box::from_raw(swallowed.as_ptr()) };
+
+    /* unfullscreen the client */
+    setfullscreen(c_ref, false, globals);
+    updatetitle(c_ref, globals);
+    arrange(Some(c_ref.mon), globals);
+    unsafe {
+        XMapWindow(globals.dpy.as_ptr(), c_ref.win);
+        XMoveResizeWindow(
+            globals.dpy.as_ptr(),
+            c_ref.win,
+            c_ref.x,
+            c_ref.y,
+            c_ref.w as u32,
+            c_ref.h as u32,
+        );
+    }
+    setclientstate(c_ref, NORMAL_STATE as i64, globals);
+    focus(None, globals);
+    arrange(Some(c_ref.mon), globals);
+}
+
 fn detach(mut c: NonNull<Client>) {
     let mut tc = &mut unsafe { c.as_mut().mon.as_mut() }.clients;
     while let Some(tc_inner) = tc.as_mut()
@@ -2710,6 +2904,8 @@ fn applyrules(c: &mut Client, globals: &Globals) {
             true
         };
         if r_title && r_class && r_instance {
+            c.isterminal = r.isterminal;
+            c.noswallow = r.noswallow;
             c.isfloating = r.isfloating;
             c.tags |= r.tags;
             let mut m = Some(globals.mons);
@@ -3387,10 +3583,15 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
         snext: None,
         mon: NonNull::dangling(),
         win: w,
+        isterminal: false,
+        noswallow: false,
+        pid: winpid(w, globals),
+        swallowing: None,
     })))
     .expect("valid box construction");
 
     let c_ref = unsafe { c.as_mut() };
+    let mut term: Option<NonNull<Client>> = None;
 
     updatetitle(c_ref, globals);
 
@@ -3403,6 +3604,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
     } else {
         c_ref.mon = globals.selmon;
         applyrules(c_ref, globals);
+        term = termforwin(c, globals);
     }
 
     if c_ref.x + c_ref.width() > unsafe { c_ref.mon.as_ref().wx + c_ref.mon.as_ref().ww } {
@@ -3478,6 +3680,10 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
     arrange(Some(unsafe { c.as_ref() }.mon), globals);
     unsafe { XMapWindow(globals.dpy.as_ptr(), c.as_ref().win) };
 
+    if let Some(term) = term {
+        swallow(term, c, globals);
+    }
+
     focus(None, globals);
 }
 
@@ -3514,6 +3720,27 @@ fn updateclientlist(globals: &Globals) {
 fn unmanage(c: NonNull<Client>, destroyed: bool, globals: &mut Globals) {
     let m = unsafe { c.as_ref() }.mon;
     let mut wc: XWindowChanges = unsafe { core::mem::zeroed() };
+
+    if unsafe { c.as_ref().swallowing.is_some() } {
+        unswallow(c, globals);
+        return;
+    }
+
+    //TODO check assumptions here;
+    let s: Option<NonNull<Client>> = swallowingclient(unsafe { c.as_ref().win }, globals);
+    if let Some(mut s) = s {
+        let swallowing = unsafe {
+            s.as_mut()
+                .swallowing
+                .take()
+                .expect("should have a swallowed field in this case")
+        };
+        let _ = unsafe { Box::from_raw(swallowing.as_ptr()) };
+        arrange(Some(m), globals);
+        focus(None, globals);
+        return;
+    }
+
     detach(c);
     detachstack(c);
     if !destroyed {
@@ -3548,6 +3775,9 @@ fn unmanage(c: NonNull<Client>, destroyed: bool, globals: &mut Globals) {
     unsafe {
         let _ = Box::from_raw(c.as_ptr());
     }
+    //NOTE: swallowing patch has a check here if to only run this is s is none
+    //but is s is some we will have returned already above. So not possible for
+    //s to not be none in this case.
     focus(None, globals);
     updateclientlist(globals);
     arrange(Some(m), globals);
@@ -3615,7 +3845,7 @@ fn scan(globals: &mut Globals) {
     }
 }
 
-fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
+fn setup(dpy: NonNull<Display>, resources: Resources, xcon: NonNull<XcbConnectionT>) -> Globals {
     /* do not transform children into zombies when they terminate */
     let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&mut sa.sa_mask) };
@@ -3663,6 +3893,7 @@ fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
         wmcheckwin: 0,
         last_motion_mon: None,
         resources,
+        xcon,
     };
 
     updategeom(&mut globals);
@@ -3933,10 +4164,14 @@ fn main() {
         die!("dwm: cannot open display");
     };
 
+    let Some(xcon) = NonNull::new(unsafe { XGetXCBConnection(dpy.as_ptr()) }) else {
+        die!("dwm: cannot get xcb connection\n");
+    };
+
     checkotherwm(dpy);
     unsafe { XrmInitialize() };
     let resources = load_xresources();
-    let mut globals = setup(dpy, resources);
+    let mut globals = setup(dpy, resources, xcon);
     scan(&mut globals);
     run(&mut globals);
     let dpy: *mut Display = cleanup(globals);
