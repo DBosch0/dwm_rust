@@ -1230,7 +1230,26 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
     if ev.window == unsafe { globals.selmon.as_ref() }.barwin {
         let mut i = 0;
         let mut x = 0;
+        let mut occ: u32 = 0;
+        let mut c = unsafe { m.as_ref() }.clients;
+        while let Some(c_inner) = c {
+            occ |= if unsafe { c_inner.as_ref() }.tags == TAGMASK {
+                0
+            } else {
+                unsafe { c_inner.as_ref() }.tags
+            };
+            c = unsafe { c_inner.as_ref() }.next;
+        }
+
         loop {
+            //             if (!(occ & 1 << i || m->tagset[m->seltags] & 1 << i))
+            // +				continue;
+            if !(occ & 1 << i != 0
+                || unsafe { m.as_ref() }.tagset[unsafe { m.as_ref() }.seltags as usize] & 1 << i
+                    != 0)
+            {
+                continue;
+            }
             let ctag = CString::new(config::TAGS[i]).expect("valid CStr");
             x += text_w(ctag.as_ptr(), globals);
             if ev.x < x {
@@ -1987,7 +2006,7 @@ fn drawbar(m: &Monitor, globals: &mut Globals) {
     let mut c = m.clients;
     while let Some(c_inner) = c {
         let c_ref = unsafe { c_inner.as_ref() };
-        occ |= c_ref.tags;
+        occ |= if c_ref.tags == TAGMASK { 0 } else { c_ref.tags };
         if c_ref.isurgent {
             urg |= c_ref.tags;
         }
@@ -1995,6 +2014,11 @@ fn drawbar(m: &Monitor, globals: &mut Globals) {
     }
     let mut x = 0;
     for i in 0..config::TAGS.len() {
+        // Do not draw vacant tags
+        if !(occ & 1 << i != 0 || m.tagset[m.seltags as usize] & 1 << i != 0) {
+            continue;
+        }
+
         let tag = CString::new(config::TAGS[i]).expect("valid c string");
         let w = globals.drw.fontset_getwidth(tag.as_ptr()) + globals.lrpad as u32;
         globals.drw.setscheme(Rc::clone(
@@ -2013,19 +2037,6 @@ fn drawbar(m: &Monitor, globals: &mut Globals) {
             tag.as_ptr(),
             urg & 1 << i != 0,
         );
-        if occ & 1 << i != 0 {
-            globals.drw.rect(
-                x + boxs as i32,
-                boxs as i32,
-                boxw,
-                boxw,
-                is_selmon
-                    && unsafe { globals.selmon.as_ref() }
-                        .sel
-                        .map_or(false, |sel| unsafe { sel.as_ref() }.tags & 1 << i != 0),
-                urg & 1 << i != 0,
-            );
-        }
         x += w as i32;
     }
 
