@@ -633,6 +633,7 @@ fn setlayout(arg: &Arg, globals: &mut Globals) {
     if should_toggle {
         unsafe { globals.selmon.as_mut() }.sellt ^= 1;
     }
+
     if let Some(l) = layout {
         (unsafe { globals.selmon.as_mut() }.lt)
             [unsafe { globals.selmon.as_ref() }.sellt as usize] = l;
@@ -648,6 +649,7 @@ fn setlayout(arg: &Arg, globals: &mut Globals) {
             globals.selmon.as_ref().ltsymbol.len(),
         )
     };
+
     if unsafe { globals.selmon.as_ref() }.sel.is_some() {
         arrange(Some(globals.selmon), globals);
     } else {
@@ -1242,22 +1244,19 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
         }
 
         loop {
-            //             if (!(occ & 1 << i || m->tagset[m->seltags] & 1 << i))
-            // +				continue;
-            if !(occ & 1 << i != 0
+            if occ & 1 << i != 0
                 || unsafe { m.as_ref() }.tagset[unsafe { m.as_ref() }.seltags as usize] & 1 << i
-                    != 0)
+                    != 0
             {
-                continue;
-            }
-            let ctag = CString::new(config::TAGS[i]).expect("valid CStr");
-            x += text_w(ctag.as_ptr(), globals);
-            if ev.x < x {
-                break; // clicked on tag i — don't increment, matches C do-while break
+                let ctag = CString::new(config::TAGS[i]).expect("valid CStr");
+                x += text_w(ctag.as_ptr(), globals);
+                if ev.x < x {
+                    break; // clicked on tag i
+                }
             }
             i += 1;
             if i >= config::TAGS.len() {
-                break; // clicked past all tags — i == TAGS.len(), matches C's ++i >= LENGTH
+                break; // clicked past all tags — i == TAGS.len()
             }
         }
 
