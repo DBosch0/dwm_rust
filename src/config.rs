@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use crate::{
-    Button, ClickState, Key, Layout, ResourceConfig, ResourceVal, ResourceValConfig, Rule,
+    Button, ClickState, Key, Layout, ResourceConfig, ResourceValConfig, Rule,
     external_functions::{
         BUTTON1, BUTTON2, BUTTON3, CONTROL_MASK, MOD1_MASK, SHIFT_MASK, keycodes::*,
     },
@@ -255,8 +255,8 @@ pub const KEYS: &[Key] = &[
     Key {
         r#mod: MODKEY,
         keysym: XK_f,
-        func: Some(crate::setlayout),
-        arg: crate::Arg::Layout(Some(&LAYOUTS[1])),
+        func: Some(crate::togglefullscreen),
+        arg: crate::Arg::I(0),
     },
     Key {
         r#mod: MODKEY,

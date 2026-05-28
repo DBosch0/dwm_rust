@@ -7,8 +7,6 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use libc::{snprintf, strncmp, strncpy, strtof, strtoul};
-
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
 
@@ -648,8 +646,14 @@ fn togglefloating(_arg: &Arg, globals: &mut Globals) {
     arrange(Some(globals.selmon), globals);
 }
 
-fn togglefullscreen(arg: &Arg, globals: &mut Globals) {
-    todo!()
+fn togglefullscreen(_arg: &Arg, globals: &mut Globals) {
+    if let Some(mut sel) = unsafe { globals.selmon.as_ref() }.sel {
+        setfullscreen(
+            unsafe { sel.as_mut() },
+            !unsafe { sel.as_ref() }.isfullscreen,
+            globals,
+        );
+    }
 }
 
 fn focusstack(arg: &Arg, globals: &mut Globals) {
@@ -787,6 +791,9 @@ fn xrdb(_arg: &Arg, globals: &mut Globals) {
         std::mem::swap(&mut scm, &mut globals.scheme[i]);
         globals.drw.scm_free(scm, false);
     }
+
+    focus(None, globals);
+    arrange(None, globals);
 }
 
 fn resource_load(db: XrmDatabase, name: &str, value: &mut ResourceVal) {
@@ -795,11 +802,11 @@ fn resource_load(db: XrmDatabase, name: &str, value: &mut ResourceVal) {
     let mut ret: XrmValue = unsafe { core::mem::zeroed() };
 
     let format = CString::new(format!("{}.{}", "dwm", name)).expect("valid CString");
-    unsafe { snprintf(fullname.as_mut_ptr(), fullname.len(), format.as_ptr()) };
+    unsafe { libc::snprintf(fullname.as_mut_ptr(), fullname.len(), format.as_ptr()) };
     fullname[fullname.len() - 1] = b'\0' as i8;
 
     unsafe { XrmGetResource(db, fullname.as_ptr(), c"*".as_ptr(), &mut r#type, &mut ret) };
-    if !(ret.addr.is_null() || unsafe { strncmp(c"String".as_ptr(), r#type, 64) } != 0) {
+    if !(ret.addr.is_null() || unsafe { libc::strncmp(c"String".as_ptr(), r#type, 64) } != 0) {
         match value {
             ResourceVal::String(s) => {
                 *s = unsafe { CStr::from_ptr(ret.addr) }
@@ -808,13 +815,13 @@ fn resource_load(db: XrmDatabase, name: &str, value: &mut ResourceVal) {
                     .to_owned()
             }
             ResourceVal::Integer(u) => {
-                *u = unsafe { strtoul(ret.addr, core::ptr::null_mut(), 10) } as u32;
+                *u = unsafe { libc::strtoul(ret.addr, core::ptr::null_mut(), 10) } as u32;
             }
             ResourceVal::Bool(b) => {
-                *b = unsafe { strtoul(ret.addr, core::ptr::null_mut(), 10) } != 0;
+                *b = unsafe { libc::strtoul(ret.addr, core::ptr::null_mut(), 10) } != 0;
             }
             ResourceVal::Float(f) => {
-                *f = unsafe { strtof(ret.addr, core::ptr::null_mut()) };
+                *f = unsafe { libc::strtof(ret.addr, core::ptr::null_mut()) };
             }
         }
     }
