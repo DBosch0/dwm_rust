@@ -16,6 +16,7 @@ mod config;
 mod drw;
 mod external_functions;
 mod util;
+mod vanitygaps;
 
 const VERSION: &str = "0.0.1";
 const TAGMASK: u32 = (1 << config::TAGS.len() as u32) - 1;
@@ -88,6 +89,7 @@ struct Client {
     name: [i8; 256],
     mina: f32,
     maxa: f32,
+    cfact: f32,
     x: i32,
     y: i32,
     w: i32,
@@ -193,6 +195,10 @@ struct Monitor {
     wy: i32,
     ww: i32,
     wh: i32,
+    gappih: i32, /* horizontal gap between windows */
+    gappiv: i32, /* vertical gap between windows */
+    gappoh: i32, /* horizontal outer gaps */
+    gappov: i32, /* vertical outer gaps */
     seltags: u32,
     sellt: u32,
     tagset: [u32; 2],
@@ -246,7 +252,7 @@ fn load_resource_int(name: &str, globals: &Globals) -> u32 {
     let ResourceVal::Integer(u) = globals
         .resources
         .get(name)
-        .expect(&format!("{} is in the resouces map", name))
+        .unwrap_or_else(|| panic!("{} is in the resouces map", name))
     else {
         unreachable!("invalid type of {} variable in Resources map", name);
     };
@@ -258,7 +264,7 @@ fn load_resource_bool(name: &str, globals: &Globals) -> bool {
     let ResourceVal::Bool(b) = globals
         .resources
         .get(name)
-        .expect(&format!("{} is in the resouces map", name))
+        .unwrap_or_else(|| panic!("{} is in the resouces map", name))
     else {
         unreachable!("invalid type of {} variable in Resources map", name);
     };
@@ -270,7 +276,7 @@ fn load_resource_float(name: &str, globals: &Globals) -> f32 {
     let ResourceVal::Float(f) = globals
         .resources
         .get(name)
-        .expect(&format!("{} is in the resouces map", name))
+        .unwrap_or_else(|| panic!("{} is in the resouces map", name))
     else {
         unreachable!("invalid type of {} variable in Resources map", name);
     };
@@ -360,80 +366,6 @@ fn nexttiled(mut c: Option<NonNull<Client>>) -> Option<NonNull<Client>> {
         c = unsafe { c_inner.as_ref() }.next;
     }
     c
-}
-
-fn tile(m: &mut Monitor, globals: &mut Globals) {
-    let mut n = 0u32;
-    let mut c = nexttiled(m.clients);
-    while let Some(c_inner) = c {
-        c = nexttiled(unsafe { c_inner.as_ref() }.next);
-        n += 1;
-    }
-    if n == 0 {
-        return;
-    }
-
-    let mw = if n > m.nmaster as u32 {
-        if m.nmaster != 0 {
-            (m.ww as f32 * m.mfact) as u32
-        } else {
-            0
-        }
-    } else {
-        m.ww as u32
-    };
-
-    let mut i = 0u32;
-    let mut my = 0u32;
-    let mut ty = 0u32;
-    c = nexttiled(m.clients);
-
-    while let Some(mut c_inner) = c {
-        // Read bw and next before the mutable resize borrow.
-        // Do NOT read height() here — C reads HEIGHT(c) *after* resize so it
-        // reflects the actual post-resize height (including any applysizehints
-        // adjustment).  Reading it before would use the stale pre-tile height,
-        // causing wrong my/ty increments from the 3rd client onwards.
-        let (bw, next) = unsafe {
-            let r = c_inner.as_ref();
-            (r.bw, r.next)
-        };
-        if i < m.nmaster as u32 {
-            let h: u32 = (m.wh as u32 - my) / (n.min(m.nmaster as u32) - i);
-            resize(
-                unsafe { c_inner.as_mut() },
-                m.wx,
-                m.wy + my as i32,
-                mw as i32 - (2 * bw),
-                h as i32 - (2 * bw),
-                false,
-                globals,
-            );
-            // HEIGHT(c) after resize = c.h + 2*c.bw; matches C's post-resize read
-            let height = unsafe { c_inner.as_ref() }.height();
-            if my as i32 + height < m.wh {
-                my += height as u32;
-            }
-        } else {
-            let h = (m.wh as u32 - ty) / (n - i);
-            resize(
-                unsafe { c_inner.as_mut() },
-                m.wx + mw as i32,
-                m.wy + ty as i32,
-                m.ww - mw as i32 - (2 * bw),
-                h as i32 - (2 * bw),
-                false,
-                globals,
-            );
-            let height = unsafe { c_inner.as_ref() }.height();
-            if ty as i32 + height < m.wh {
-                ty += height as u32;
-            }
-        }
-
-        c = nexttiled(next);
-        i += 1;
-    }
 }
 
 fn monocle(m: &mut Monitor, globals: &mut Globals) {
@@ -626,7 +558,7 @@ fn setlayout(arg: &Arg, globals: &mut Globals) {
     let Arg::Layout(layout) = *arg else {
         unreachable!("invalid argument for setlayout function")
     };
-    let should_toggle = layout.map_or(true, |l| {
+    let should_toggle = layout.is_none_or(|l| {
         !core::ptr::eq(
             l,
             unsafe { globals.selmon.as_ref() }.lt
@@ -882,6 +814,32 @@ fn incnmaster(arg: &Arg, globals: &mut Globals) {
     arrange(Some(globals.selmon), globals);
 }
 
+#[allow(dead_code)]
+fn setcfact(arg: &Arg, globals: &mut Globals) {
+    let c = unsafe { globals.selmon.as_ref() }.sel;
+
+    if c.is_none()
+        || unsafe { globals.selmon.as_ref() }.lt[unsafe { globals.selmon.as_ref() }.sellt as usize]
+            .arrange
+            .is_none()
+    {
+        return;
+    }
+    let mut c = c.expect("checked to be Some");
+
+    let Arg::F(fa) = arg else {
+        unreachable!("invalid argument to setcfact function")
+    };
+    let mut f = *fa + unsafe { c.as_ref() }.cfact;
+    if *fa == 0.0 {
+        f = 1.0;
+    } else if !(0.25..=4.0).contains(&f) {
+        return;
+    }
+    unsafe { c.as_mut() }.cfact = f;
+    arrange(Some(globals.selmon), globals);
+}
+
 fn setmfact(arg: &Arg, globals: &mut Globals) {
     if unsafe { globals.selmon.as_ref() }.lt[unsafe { globals.selmon.as_ref() }.sellt as usize]
         .arrange
@@ -1013,11 +971,11 @@ fn load_xresources() -> Resources {
     } in config::RESOURCE_MAPPING
     {
         let value = default_value.to_resource_val();
-        let mut entry = resources.entry(name).or_insert(value);
+        let entry = resources.entry(name).or_insert(value);
 
         // see if we can load an updated value from the xresouces;
         if !db.is_null() {
-            resource_load(db, x_resource_name, &mut entry);
+            resource_load(db, x_resource_name, entry);
         }
     }
 
@@ -1187,7 +1145,7 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
             }
             _ => {}
         }
-        if unsafe { ev.r#type } == BUTTON_RELEASE as i32 {
+        if unsafe { ev.r#type } == BUTTON_RELEASE {
             break;
         }
     }
@@ -1303,7 +1261,7 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
             }
             _ => {}
         }
-        if unsafe { ev.r#type } == BUTTON_RELEASE as i32 {
+        if unsafe { ev.r#type } == BUTTON_RELEASE {
             break;
         }
     }
@@ -1830,6 +1788,10 @@ fn createmon(globals: &Globals) -> NonNull<Monitor> {
         wy: 0,
         ww: 0,
         wh: 0,
+        gappih: load_resource_int("GAPP_IH", globals) as i32,
+        gappiv: load_resource_int("GAPP_IV", globals) as i32,
+        gappoh: load_resource_int("GAPP_OH", globals) as i32,
+        gappov: load_resource_int("GAPP_OV", globals) as i32,
         seltags: 0,
         sellt: 0,
         tagset: [1, 1],
@@ -1889,7 +1851,8 @@ fn updatewmhints(c: &mut Client, globals: &Globals) {
     if !wmh.is_null() {
         let is_sel = unsafe { globals.selmon.as_ref() }
             .sel
-            .map_or(false, |sel| core::ptr::eq(c as *const _, sel.as_ptr()));
+            .is_some_and(|sel| core::ptr::eq(c as *const _, sel.as_ptr()));
+        // .map_or(false, |sel| core::ptr::eq(c as *const _, sel.as_ptr()));
         if is_sel && unsafe { &*wmh }.flags & X_URGENCY_HINT != 0 {
             unsafe { &mut *wmh }.flags &= !X_URGENCY_HINT;
             unsafe { XSetWMHints(globals.dpy.as_ptr(), c.win, wmh) };
@@ -2544,7 +2507,7 @@ fn setfocus(c: &Client, globals: &Globals) {
             globals.netatom[NetAtom::ActiveWindow as usize],
             XA_WINDOW,
             32,
-            PROP_MODE_REPLACE as i32,
+            PROP_MODE_REPLACE,
             (&c.win) as *const _ as *const u8,
             1,
         );
@@ -2583,7 +2546,7 @@ fn unfocus(c: Option<NonNull<Client>>, setfocus: bool, globals: &mut Globals) {
 }
 
 fn focus(mut c: Option<NonNull<Client>>, globals: &mut Globals) {
-    if !c.is_some_and(|c| is_visible(c)) {
+    if !c.is_some_and(is_visible) {
         c = unsafe { globals.selmon.as_ref() }.stack;
         while let Some(c_inner) = c
             && !is_visible(c_inner)
@@ -3164,7 +3127,7 @@ fn setclientstate(c: &Client, state: i64, globals: &Globals) {
             globals.wmatom[WMAtom::State as usize],
             globals.wmatom[WMAtom::State as usize],
             32,
-            PROP_MODE_REPLACE as i32,
+            PROP_MODE_REPLACE,
             (&data) as *const _ as *const u8,
             2,
         );
@@ -3180,7 +3143,7 @@ fn setfullscreen(c: &mut Client, fullscreen: bool, globals: &mut Globals) {
                 globals.netatom[NetAtom::WMState as usize],
                 XA_ATOM,
                 32,
-                PROP_MODE_REPLACE as i32,
+                PROP_MODE_REPLACE,
                 &globals.netatom[NetAtom::WMFullscreen as usize] as *const _ as *const u8,
                 1,
             )
@@ -3204,7 +3167,7 @@ fn setfullscreen(c: &mut Client, fullscreen: bool, globals: &mut Globals) {
                 globals.netatom[NetAtom::WMState as usize],
                 XA_ATOM,
                 32,
-                PROP_MODE_REPLACE as i32,
+                PROP_MODE_REPLACE,
                 core::ptr::null::<u8>(),
                 0,
             )
@@ -3411,6 +3374,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
         hintsvalid: false,
         bw: 0,
         oldbw: wa.border_width,
+        cfact: 1.0,
         tags: 0,
         isfixed: false,
         isfloating: false,
@@ -3491,7 +3455,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
             globals.netatom[NetAtom::ClientList as usize],
             XA_WINDOW,
             32,
-            PROP_MODE_APPEND as i32,
+            PROP_MODE_APPEND,
             (&c.as_ref().win) as *const _ as *const u8,
             1,
         )
@@ -3536,7 +3500,7 @@ fn updateclientlist(globals: &Globals) {
                     globals.netatom[NetAtom::ClientList as usize],
                     XA_WINDOW,
                     32,
-                    PROP_MODE_APPEND as i32,
+                    PROP_MODE_APPEND,
                     (&c_inner.as_ref().win) as *const _ as *const u8,
                     1,
                 )
@@ -3640,9 +3604,9 @@ fn scan(globals: &mut Globals) {
             }
             if unsafe { XGetTransientForHint(globals.dpy.as_ptr(), *wins.add(i), &mut d1) } != 0
                 && (wa.map_state == IS_VIEWABLE
-                    || getstate(unsafe { *wins.add(i as usize) }, globals) == ICONIC_STATE)
+                    || getstate(unsafe { *wins.add(i) }, globals) == ICONIC_STATE)
             {
-                manage(unsafe { *wins.add(i as usize) }, &wa, globals);
+                manage(unsafe { *wins.add(i) }, &wa, globals);
             }
         }
         if !wins.is_null() {
@@ -3775,7 +3739,7 @@ fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
             globals.netatom[NetAtom::WMCheck as usize],
             XA_WINDOW,
             32,
-            PROP_MODE_REPLACE as i32,
+            PROP_MODE_REPLACE,
             (&wmcheckwin) as *const u64 as *const u8,
             1,
         )
@@ -3787,7 +3751,7 @@ fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
             globals.netatom[NetAtom::WMName as usize],
             utf8string,
             8,
-            PROP_MODE_REPLACE as i32,
+            PROP_MODE_REPLACE,
             c"dwm".as_ptr() as *const u8,
             3,
         )
@@ -3799,7 +3763,7 @@ fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
             globals.netatom[NetAtom::WMCheck as usize],
             XA_WINDOW,
             32,
-            PROP_MODE_REPLACE as i32,
+            PROP_MODE_REPLACE,
             (&wmcheckwin) as *const u64 as *const u8,
             1,
         )
@@ -3812,7 +3776,7 @@ fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
             globals.netatom[NetAtom::Supported as usize],
             XA_ATOM,
             32,
-            PROP_MODE_REPLACE as i32,
+            PROP_MODE_REPLACE,
             (&globals.netatom) as *const u64 as *const u8,
             NetAtom::Last as i32,
         )

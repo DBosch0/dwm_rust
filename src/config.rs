@@ -22,6 +22,12 @@ pub const NORM_FG_COLOR_DEFAULT: &str = "#bbbbbb";
 pub const SEL_FG_COLOR_DEFAULT: &str = "#eeeeee";
 pub const SEL_BORDER_COLOR_DEFAULT: &str = "#770000";
 pub const SEL_BG_COLOR_DEFAULT: &str = "#005577";
+pub const GAPP_IH_DEFAULT: u32 = 20;
+pub const GAPP_IV_DEFAULT: u32 = 20;
+pub const GAPP_OH_DEFAULT: u32 = 20;
+pub const GAPP_OV_DEFAULT: u32 = 20;
+pub const SMART_GAPS_DEFAULT: bool = false;
+pub const FORCE_VSPLIT: bool = true; /* nrowgrid layout: force two clients to always split vertically */
 
 // Must be the names of the color variables, not the variables themselves.
 // Will be loaded dynamically at runtime. If using pywall to set Xresouces
@@ -65,15 +71,59 @@ pub const REFRESH_RATE: u32 = 120; /* refresh rate (per second) for client move/
 pub const LAYOUTS: &[Layout] = &[
     Layout {
         symbol: "[]=",
-        arrange: Some(crate::tile),
-    },
-    Layout {
-        symbol: "><>",
-        arrange: None,
+        arrange: Some(crate::vanitygaps::tile),
     },
     Layout {
         symbol: "[M]",
         arrange: Some(crate::monocle),
+    },
+    Layout {
+        symbol: "[@]",
+        arrange: Some(crate::vanitygaps::spiral),
+    },
+    Layout {
+        symbol: "[\\]",
+        arrange: Some(crate::vanitygaps::dwindle),
+    },
+    Layout {
+        symbol: "H[]",
+        arrange: Some(crate::vanitygaps::deck),
+    },
+    Layout {
+        symbol: "TTT",
+        arrange: Some(crate::vanitygaps::bstack),
+    },
+    Layout {
+        symbol: "===",
+        arrange: Some(crate::vanitygaps::bstackhoriz),
+    },
+    Layout {
+        symbol: "HHH",
+        arrange: Some(crate::vanitygaps::grid),
+    },
+    Layout {
+        symbol: "###",
+        arrange: Some(crate::vanitygaps::nrowgrid),
+    },
+    Layout {
+        symbol: "---",
+        arrange: Some(crate::vanitygaps::horizgrid),
+    },
+    Layout {
+        symbol: ":::",
+        arrange: Some(crate::vanitygaps::gaplessgrid),
+    },
+    Layout {
+        symbol: "|M|",
+        arrange: Some(crate::vanitygaps::centeredmaster),
+    },
+    Layout {
+        symbol: ">M>",
+        arrange: Some(crate::vanitygaps::centeredfloatingmaster),
+    },
+    Layout {
+        symbol: "><>",
+        arrange: None,
     },
 ];
 
@@ -165,12 +215,32 @@ pub const RESOURCE_MAPPING: &[ResourceConfig] = &[
         x_resource_name: "mfact",
         default_value: ResourceValConfig::Float(M_FACT_DEFAULT),
     },
-    // ["GAPPIH","gappih"],
-    // ["GAPPIV","gappiv"],
-    // ["GAPPOH","gappoh"],
-    // ["GAPPOV","gappov"],
+    ResourceConfig {
+        name: "GAPP_IH",
+        x_resource_name: "gappih",
+        default_value: ResourceValConfig::Integer(GAPP_IH_DEFAULT),
+    },
+    ResourceConfig {
+        name: "GAPP_IV",
+        x_resource_name: "gappiv",
+        default_value: ResourceValConfig::Integer(GAPP_IV_DEFAULT),
+    },
+    ResourceConfig {
+        name: "GAPP_OH",
+        x_resource_name: "gappoh",
+        default_value: ResourceValConfig::Integer(GAPP_OH_DEFAULT),
+    },
+    ResourceConfig {
+        name: "GAPP_OV",
+        x_resource_name: "gappov",
+        default_value: ResourceValConfig::Integer(GAPP_OV_DEFAULT),
+    },
+    ResourceConfig {
+        name: "SMART_GAPS",
+        x_resource_name: "smartgaps",
+        default_value: ResourceValConfig::Bool(SMART_GAPS_DEFAULT),
+    },
     // ["SWALLOW_FLOATING","swallowfloating"],
-    // ["SMART_GAPS","smartgaps"  ],
 ];
 
 pub const KEYS: &[Key] = &[
@@ -618,7 +688,7 @@ pub const BUTTONS: &[Button] = &[
         mask: 0,
         button: BUTTON3,
         func: Some(crate::setlayout),
-        arg: crate::Arg::Layout(Some(&LAYOUTS[2])),
+        arg: crate::Arg::Layout(Some(&LAYOUTS[LAYOUTS.len() - 1])),
     },
     Button {
         click: ClickState::WinTitle,
