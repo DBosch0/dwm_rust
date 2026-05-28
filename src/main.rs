@@ -1,3 +1,5 @@
+// #[allow(lint)]
+
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::io::{Write, stderr};
@@ -3241,6 +3243,146 @@ fn updatewindowtype(mut c: NonNull<Client>, globals: &mut Globals) {
     if wtype == globals.netatom[NetAtom::WMWindowTypeDialog as usize] {
         unsafe { c.as_mut().isfloating = true };
     }
+}
+
+fn shift(tag: u32, i: i32) -> u32 {
+    if i > 0 {
+        (tag << i as u32) | (tag >> (config::TAGS.len() as u32 - i as u32))
+    } else {
+        (tag >> (-i) as u32) | (tag << (config::TAGS.len() as u32 - (-i) as u32))
+    }
+}
+
+#[allow(dead_code)]
+fn shifttag(arg: &Arg, globals: &mut Globals) {
+    let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+
+    if unsafe { globals.selmon.as_ref() }.clients.is_none() {
+        return;
+    }
+    let Arg::I(ai) = arg else {
+        unreachable!("invalid argument type to shifttag function")
+    };
+    shifted = shift(shifted, *ai);
+    tag(&Arg::Ui(shifted), globals);
+}
+
+fn shifttagclients(arg: &Arg, globals: &mut Globals) {
+    let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+    let mut tagmask = 0u32;
+    let mut c = unsafe { globals.selmon.as_ref() }.clients;
+    while let Some(c_inner) = c {
+        tagmask |= unsafe { c_inner.as_ref() }.tags;
+        c = unsafe { c_inner.as_ref() }.next;
+    }
+
+    let Arg::I(ai) = arg else {
+        unreachable!("invalid argument type to shifttagclients function")
+    };
+
+    loop {
+        shifted = shift(shifted, *ai);
+        if tagmask == 0 || shifted & tagmask != 0 {
+            break;
+        }
+    }
+    tag(&Arg::Ui(shifted), globals);
+}
+
+#[allow(dead_code)]
+fn shiftview(arg: &Arg, globals: &mut Globals) {
+    let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+
+    let Arg::I(ai) = arg else {
+        unreachable!("invalid argument type to shiftview function")
+    };
+    shifted = shift(shifted, *ai);
+    view(&Arg::Ui(shifted), globals);
+}
+
+fn shiftviewclients(arg: &Arg, globals: &mut Globals) {
+    let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+    let mut tagmask = 0u32;
+    let mut c = unsafe { globals.selmon.as_ref() }.clients;
+    while let Some(c_inner) = c {
+        tagmask |= unsafe { c_inner.as_ref() }.tags;
+        c = unsafe { c_inner.as_ref() }.next;
+    }
+
+    let Arg::I(ai) = arg else {
+        unreachable!("invalid argument type to shifttagview function")
+    };
+
+    loop {
+        shifted = shift(shifted, *ai);
+        if tagmask == 0 || shifted & tagmask != 0 {
+            break;
+        }
+    }
+    view(&Arg::Ui(shifted), globals);
+}
+
+#[allow(dead_code)]
+fn shiftboth(arg: &Arg, globals: &mut Globals) {
+    let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+
+    let Arg::I(ai) = arg else {
+        unreachable!("invalid argument type to shiftboth function")
+    };
+    shifted = shift(shifted, *ai);
+    tag(&Arg::Ui(shifted), globals);
+    view(&Arg::Ui(shifted), globals);
+}
+
+fn swaptags(arg: &Arg, globals: &mut Globals) {
+    let Arg::Ui(ui) = arg else {
+        unreachable!("invalid argument type to swaptags function")
+    };
+    let newtag = *ui & TAGMASK;
+    let curtag = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+
+    if newtag == curtag || curtag == 0 || (curtag & (curtag - 1)) != 0 {
+        return;
+    }
+
+    let mut c = unsafe { globals.selmon.as_ref() }.clients;
+    while let Some(mut c_inner) = c {
+        if unsafe { c_inner.as_ref() }.tags & newtag != 0
+            || unsafe { c_inner.as_ref() }.tags & curtag != 0
+        {
+            unsafe { c_inner.as_mut() }.tags ^= curtag ^ newtag;
+        }
+        if unsafe { c_inner.as_ref() }.tags == 0 {
+            unsafe { c_inner.as_mut() }.tags = newtag;
+        }
+
+        c = unsafe { c_inner.as_ref() }.next;
+    }
+
+    //uncomment to 'view' the new swaped tag
+    // unsafe { globals.selmon.as_mut() }.tagset
+    //     [unsafe { globals.selmon.as_ref() }.seltags as usize] = newtag;
+
+    focus(None, globals);
+    arrange(Some(globals.selmon), globals);
+}
+
+#[allow(dead_code)]
+fn shiftswaptags(arg: &Arg, globals: &mut Globals) {
+    let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+
+    let Arg::I(ai) = arg else {
+        unreachable!("invalid argument type to shiftswaptags function")
+    };
+    shifted = shift(shifted, *ai);
+    swaptags(&Arg::Ui(shifted), globals);
 }
 
 fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {

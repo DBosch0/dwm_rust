@@ -354,6 +354,30 @@ pub const KEYS: &[Key] = &[
         func: Some(crate::pushstack),
         arg: crate::Arg::I(0),
     },
+    Key {
+        r#mod: MODKEY,
+        keysym: XK_g,
+        func: Some(crate::shiftviewclients),
+        arg: crate::Arg::I(1),
+    },
+    Key {
+        r#mod: MODKEY | SHIFT_MASK,
+        keysym: XK_g,
+        func: Some(crate::shifttagclients),
+        arg: crate::Arg::I(1),
+    },
+    Key {
+        r#mod: MODKEY,
+        keysym: XK_semicolon,
+        func: Some(crate::shiftviewclients),
+        arg: crate::Arg::I(-1),
+    },
+    Key {
+        r#mod: MODKEY | SHIFT_MASK,
+        keysym: XK_semicolon,
+        func: Some(crate::shifttagclients),
+        arg: crate::Arg::I(-1),
+    },
     // The '1' key
     Key {
         r#mod: MODKEY,
