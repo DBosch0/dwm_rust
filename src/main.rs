@@ -38,6 +38,7 @@ enum NetAtom {
     WMState,
     WMCheck,
     WMFullscreen,
+    WMSticky,
     ActiveWindow,
     WMWindowType,
     WMWindowTypeDialog,
@@ -110,6 +111,7 @@ struct Client {
     neverfocus: bool,
     oldstate: bool,
     isfullscreen: bool,
+    issticky: bool,
     next: Option<NonNull<Client>>,
     snext: Option<NonNull<Client>>,
     mon: NonNull<Monitor>,
@@ -222,7 +224,7 @@ macro_rules! intersect {
 fn is_visible(c: NonNull<Client>) -> bool {
     let c_ref = unsafe { c.as_ref() };
     let m_ref = unsafe { c_ref.mon.as_ref() };
-    c_ref.tags & m_ref.tagset[m_ref.seltags as usize] != 0
+    c_ref.tags & m_ref.tagset[m_ref.seltags as usize] != 0 || c_ref.issticky
 }
 
 #[inline(always)]
@@ -509,6 +511,17 @@ fn tag(arg: &Arg, globals: &mut Globals) {
     }
 }
 
+fn togglesticky(_arg: &Arg, globals: &mut Globals) {
+    if let Some(mut sel) = unsafe { globals.selmon.as_ref() }.sel {
+        setsticky(
+            unsafe { sel.as_mut() },
+            !unsafe { sel.as_ref() }.issticky,
+            globals,
+        );
+        arrange(Some(globals.selmon), globals);
+    }
+}
+
 fn toggletag(arg: &Arg, globals: &mut Globals) {
     let Arg::Ui(ui) = arg else { unreachable!() };
     if let Some(mut sel) = unsafe { globals.selmon.as_ref() }.sel {
@@ -570,6 +583,39 @@ fn spawn(arg: &Arg, globals: &mut Globals) {
             libc::execvp(com[0], com.as_ptr());
         }
         die!("dwm: execvp failed");
+    }
+}
+
+fn setsticky(c: &mut Client, sticky: bool, globals: &mut Globals) {
+    if sticky && !c.issticky {
+        unsafe {
+            XChangeProperty(
+                globals.dpy.as_ptr(),
+                c.win,
+                globals.netatom[NetAtom::WMState as usize],
+                XA_ATOM,
+                32,
+                PROP_MODE_REPLACE,
+                &globals.netatom[NetAtom::WMSticky as usize] as *const u64 as *const u8,
+                1,
+            );
+        }
+        c.issticky = true;
+    } else if !sticky && c.issticky {
+        unsafe {
+            XChangeProperty(
+                globals.dpy.as_ptr(),
+                c.win,
+                globals.netatom[NetAtom::WMState as usize],
+                XA_ATOM,
+                32,
+                PROP_MODE_REPLACE,
+                core::ptr::null(),
+                0,
+            );
+        }
+        c.issticky = false;
+        arrange(Some(c.mon), globals);
     }
 }
 
@@ -1261,6 +1307,17 @@ fn clientmessage(ev: &mut XEvent, globals: &mut Globals) {
                 && !unsafe { c.as_ref()}.isfullscreen ),
                 globals,
             );
+        }
+
+        if unsafe { cme.data.l[1] } == globals.netatom[NetAtom::WMSticky as usize] as i64
+            || unsafe { cme.data.l[2] } == globals.netatom[NetAtom::WMSticky as usize] as i64
+        {
+            setsticky(
+                unsafe { c.as_mut() },
+                unsafe { cme.data.l[0] } == 1
+                    || (unsafe { cme.data.l[0] } == 2 && !unsafe { c.as_ref() }.issticky),
+                globals,
+            )
         }
     } else if cme.message_type == globals.netatom[NetAtom::ActiveWindow as usize]
         && (unsafe { globals.selmon.as_ref().sel }.is_none()
@@ -3055,6 +3112,9 @@ fn updatewindowtype(mut c: NonNull<Client>, globals: &mut Globals) {
     if state == globals.netatom[NetAtom::WMFullscreen as usize] {
         setfullscreen(unsafe { c.as_mut() }, true, globals)
     }
+    if state == globals.netatom[NetAtom::WMSticky as usize] {
+        setsticky(unsafe { c.as_mut() }, true, globals);
+    }
     if wtype == globals.netatom[NetAtom::WMWindowTypeDialog as usize] {
         unsafe { c.as_mut().isfloating = true };
     }
@@ -3093,6 +3153,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
         neverfocus: false,
         oldstate: false,
         isfullscreen: false,
+        issticky: false,
         next: None,
         snext: None,
         mon: NonNull::dangling(),
@@ -3401,6 +3462,8 @@ fn setup(dpy: NonNull<Display>, resources: Resources) -> Globals {
             XInternAtom(dpy.as_ptr(), c"_NET_SUPPORTING_WM_CHECK".as_ptr(), 0);
         globals.netatom[NetAtom::WMFullscreen as usize] =
             XInternAtom(dpy.as_ptr(), c"_NET_WM_STATE_FULLSCREEN".as_ptr(), 0);
+        globals.netatom[NetAtom::WMSticky as usize] =
+            XInternAtom(dpy.as_ptr(), c"_NET_WM_STATE_STICKY".as_ptr(), 0);
         globals.netatom[NetAtom::WMWindowType as usize] =
             XInternAtom(dpy.as_ptr(), c"_NET_WM_WINDOW_TYPE".as_ptr(), 0);
         globals.netatom[NetAtom::WMWindowTypeDialog as usize] =

@@ -324,6 +324,12 @@ pub const KEYS: &[Key] = &[
         func: Some(crate::xrdb),
         arg: crate::Arg::I(0),
     },
+    Key {
+        r#mod: MODKEY,
+        keysym: XK_s,
+        func: Some(crate::togglesticky),
+        arg: crate::Arg::I(0),
+    },
     // The '1' key
     Key {
         r#mod: MODKEY,
