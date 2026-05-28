@@ -19,6 +19,7 @@ const VERSION: &str = "0.0.1";
 const TAGMASK: u32 = (1 << config::TAGS.len() as u32) - 1;
 const BUTTON_MASK: i64 = BUTTON_PRESS_MASK | BUTTON_RELEASE_MASK;
 const MOUSE_MASK: i64 = BUTTON_MASK | POINTER_MOTION_MASK;
+const PREV_SEL: i32 = 3000;
 
 enum CursorState {
     Normal = 0,
@@ -704,57 +705,169 @@ fn togglefullscreen(_arg: &Arg, globals: &mut Globals) {
     }
 }
 
+//Some sort of infinite loop here
 fn focusstack(arg: &Arg, globals: &mut Globals) {
-    let mut c: Option<NonNull<Client>> = None;
+    let mut i = stackpos(arg, globals);
+    if i < 0 {
+        return;
+    }
+    let mut p = None;
+    let mut c = unsafe { globals.selmon.as_ref() }.clients;
+    while let Some(c_inner) = c
+        && (i > 0 || !is_visible(c_inner))
+    {
+        i -= if is_visible(c_inner) { 1 } else { 0 };
+        p = c;
+        c = unsafe { c_inner.as_ref() }.next;
+    }
+    focus(if c.is_some() { c } else { p }, globals);
+    restack(unsafe { globals.selmon.as_ref() }, globals);
 
-    let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
+    // let mut c: Option<NonNull<Client>> = None;
+    // let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
+    //     return;
+    // };
+    // let sel = unsafe { sel.as_ref() };
+    // if sel.isfullscreen && config::LOCK_FULLSCREEN {
+    //     return;
+    // }
+    // let Arg::I(ai) = arg else {
+    //     unreachable!("invalid input to focus stack")
+    // };
+    // if *ai > 0 {
+    //     c = sel.next;
+    //     while let Some(c_inner) = c
+    //         && !is_visible(c_inner)
+    //     {
+    //         c = unsafe { c_inner.as_ref().next };
+    //     }
+    //     if c.is_none() {
+    //         c = unsafe { globals.selmon.as_ref() }.clients;
+    //         while let Some(c_inner) = c
+    //             && !is_visible(c_inner)
+    //         {
+    //             c = unsafe { c_inner.as_ref() }.next;
+    //         }
+    //     }
+    // } else {
+    //     let mut i = unsafe { globals.selmon.as_ref() }.clients;
+    //     while let Some(i_inner) = i
+    //         && i != unsafe { globals.selmon.as_ref() }.sel
+    //     {
+    //         if is_visible(i_inner) {
+    //             c = i;
+    //         }
+    //         i = unsafe { i_inner.as_ref() }.next;
+    //     }
+    //     if c.is_none() {
+    //         while let Some(i_inner) = i {
+    //             if is_visible(i_inner) {
+    //                 c = i;
+    //             }
+    //             i = unsafe { i_inner.as_ref() }.next;
+    //         }
+    //     }
+    // }
+
+    // if c.is_some() {
+    //     focus(c, globals);
+    //     restack(unsafe { globals.selmon.as_ref() }, globals);
+    // }
+}
+
+fn pushstack(arg: &Arg, globals: &mut Globals) {
+    let mut i = stackpos(arg, globals);
+
+    if i < 0 {
         return;
-    };
-    let sel = unsafe { sel.as_ref() };
-    if sel.isfullscreen && config::LOCK_FULLSCREEN {
-        return;
+    } else if i == 0 {
+        let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
+            unreachable!("should be unreachable state due to pushstack")
+        };
+        detach(sel);
+        attach(sel);
+    } else {
+        let Some(mut sel) = unsafe { globals.selmon.as_ref() }.sel else {
+            unreachable!("should be unreachable state due to pushstack")
+        };
+        let mut p = None;
+        let mut c = unsafe { globals.selmon.as_ref() }.clients;
+        while let Some(c_inner) = c {
+            i -= if is_visible(c_inner) && c_inner != sel {
+                1
+            } else {
+                0
+            };
+            if i == 0 {
+                break;
+            }
+            p = c;
+            c = unsafe { c_inner.as_ref() }.next;
+        }
+        let mut c = if let Some(c_inner) = c {
+            c_inner
+        } else {
+            p.expect("should have value at this point if c is None")
+        };
+        detach(sel);
+        unsafe { sel.as_mut() }.next = unsafe { c.as_ref() }.next;
+        unsafe { c.as_mut() }.next = Some(sel);
+    }
+    arrange(Some(globals.selmon), globals);
+}
+
+fn stackpos(arg: &Arg, globals: &mut Globals) -> i32 {
+    if unsafe { globals.selmon.as_ref() }.clients.is_none() {
+        return -1;
     }
     let Arg::I(ai) = arg else {
-        unreachable!("invalid input to focus stack")
+        unreachable!("invalid argument to stackpos function")
     };
-    if *ai > 0 {
-        c = sel.next;
+    if *ai == PREV_SEL {
+        let mut l = unsafe { globals.selmon.as_ref() }.stack;
+        while let Some(l_inner) = l
+            && (!is_visible(l_inner) || l == unsafe { globals.selmon.as_ref() }.sel)
+        {
+            l = unsafe { l_inner.as_ref() }.snext
+        }
+        let Some(l) = l else { return -1 };
+        let mut i = 0;
+        let mut c = unsafe { globals.selmon.as_ref() }.clients;
         while let Some(c_inner) = c
-            && !is_visible(c_inner)
+            && c_inner != l
         {
-            c = unsafe { c_inner.as_ref().next };
+            i += if is_visible(c_inner) { 1 } else { 0 };
+            c = unsafe { c_inner.as_ref() }.next;
         }
-        if c.is_none() {
-            c = unsafe { globals.selmon.as_ref() }.clients;
-            while let Some(c_inner) = c
-                && !is_visible(c_inner)
-            {
-                c = unsafe { c_inner.as_ref() }.next;
-            }
+        i
+    } else if *ai > 1000 && *ai < 3000 {
+        let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
+            return -1;
+        };
+        let mut i = 0;
+        let mut c = unsafe { globals.selmon.as_ref() }.clients;
+        while let Some(c_inner) = c
+            && c_inner != sel
+        {
+            i += if is_visible(c_inner) { 1 } else { 0 };
+            c = unsafe { c_inner.as_ref() }.next;
         }
+        let mut n = i;
+        while let Some(c_inner) = c {
+            n += if is_visible(c_inner) { 1 } else { 0 };
+            c = unsafe { c_inner.as_ref() }.next;
+        }
+        (i + (*ai - 2000)).rem_euclid(n)
+    } else if *ai < 0 {
+        let mut i = 0;
+        let mut c = unsafe { globals.selmon.as_ref() }.clients;
+        while let Some(c_inner) = c {
+            i += if is_visible(c_inner) { 1 } else { 0 };
+            c = unsafe { c_inner.as_ref() }.next;
+        }
+        (i + *ai).max(0)
     } else {
-        let mut i = unsafe { globals.selmon.as_ref() }.clients;
-        while let Some(i_inner) = i
-            && i != unsafe { globals.selmon.as_ref() }.sel
-        {
-            if is_visible(i_inner) {
-                c = i;
-            }
-            i = unsafe { i_inner.as_ref() }.next;
-        }
-        if c.is_none() {
-            while let Some(i_inner) = i {
-                if is_visible(i_inner) {
-                    c = i;
-                }
-                i = unsafe { i_inner.as_ref() }.next;
-            }
-        }
-    }
-
-    if c.is_some() {
-        focus(c, globals);
-        restack(unsafe { globals.selmon.as_ref() }, globals);
+        *ai
     }
 }
 

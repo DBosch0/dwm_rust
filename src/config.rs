@@ -7,7 +7,7 @@ use crate::{
 };
 
 /* appearance */
-pub const BORDER_PX_DEFAULT: u32 = 1; /* border pixel of windows */
+pub const BORDER_PX_DEFAULT: u32 = 3; /* border pixel of windows */
 pub const SNAP_DEFAULT: u32 = 32; /* snap pixel */
 pub const SHOW_BAR_DEFAULT: bool = true; /* false means no bar */
 pub const TOP_BAR_DEFAULT: bool = true; /* false means bottom bar */
@@ -58,7 +58,7 @@ pub const RULES: &[Rule] = &[
 //layout(s)
 pub const M_FACT_DEFAULT: f32 = 0.55; /* factor of master area size [0.05..0.95] */
 pub const N_MASTER_DEFAULT: u32 = 1; /* number of clients in master area */
-pub const RESIZE_HINTS_DEFAULT: bool = true; /* true means respect size hints in tiled resizals */
+pub const RESIZE_HINTS_DEFAULT: bool = false; /* true means respect size hints in tiled resizals */
 pub const LOCK_FULLSCREEN: bool = true; /* true will force focus on the fullscreen window */
 pub const REFRESH_RATE: u32 = 120; /* refresh rate (per second) for client move/resize */
 
@@ -194,18 +194,6 @@ pub const KEYS: &[Key] = &[
     },
     Key {
         r#mod: MODKEY,
-        keysym: XK_j,
-        func: Some(crate::focusstack),
-        arg: crate::Arg::I(1),
-    },
-    Key {
-        r#mod: MODKEY,
-        keysym: XK_k,
-        func: Some(crate::focusstack),
-        arg: crate::Arg::I(-1),
-    },
-    Key {
-        r#mod: MODKEY,
         keysym: XK_i,
         func: Some(crate::incnmaster),
         arg: crate::Arg::I(1),
@@ -328,6 +316,42 @@ pub const KEYS: &[Key] = &[
         r#mod: MODKEY,
         keysym: XK_s,
         func: Some(crate::togglesticky),
+        arg: crate::Arg::I(0),
+    },
+    Key {
+        r#mod: MODKEY,
+        keysym: XK_j,
+        func: Some(crate::focusstack),
+        arg: crate::Arg::I(1 + 2000),
+    },
+    Key {
+        r#mod: MODKEY,
+        keysym: XK_k,
+        func: Some(crate::focusstack),
+        arg: crate::Arg::I(-1 + 2000),
+    },
+    Key {
+        r#mod: MODKEY,
+        keysym: XK_v,
+        func: Some(crate::focusstack),
+        arg: crate::Arg::I(0),
+    },
+    Key {
+        r#mod: MODKEY | SHIFT_MASK,
+        keysym: XK_j,
+        func: Some(crate::pushstack),
+        arg: crate::Arg::I(1 + 2000),
+    },
+    Key {
+        r#mod: MODKEY | SHIFT_MASK,
+        keysym: XK_k,
+        func: Some(crate::pushstack),
+        arg: crate::Arg::I(-1 + 2000),
+    },
+    Key {
+        r#mod: MODKEY | SHIFT_MASK,
+        keysym: XK_v,
+        func: Some(crate::pushstack),
         arg: crate::Arg::I(0),
     },
     // The '1' key
