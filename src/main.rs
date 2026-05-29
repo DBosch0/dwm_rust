@@ -1,5 +1,3 @@
-// #[allow(lint)]
-
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::io::{Write, stderr};
@@ -4164,7 +4162,7 @@ fn main() {
     if unsafe { libc::setlocale(libc::LC_CTYPE, c"".as_ptr()).is_null() }
         || unsafe { XSupportsLocale() } == 0
     {
-        let _ = writeln!(stderr(), "warning, no locale support\n");
+        eprintln!("warning, no locale support");
     }
 
     let Some(dpy) = NonNull::new(unsafe { XOpenDisplay(core::ptr::null_mut()) }) else {
