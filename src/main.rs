@@ -9,8 +9,6 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use libc::pid_t;
-
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
 
@@ -377,7 +375,7 @@ struct Globals {
     wmcheckwin: Window,
     last_motion_mon: Option<NonNull<Monitor>>,
     resources: Resources,
-    xcon: NonNull<XcbConnectionT>,
+    xcon: NonNull<xcb_connection_t>,
 }
 
 fn nexttiled(mut c: Option<NonNull<Client>>) -> Option<NonNull<Client>> {
@@ -533,12 +531,12 @@ fn winpid(w: Window, globals: &Globals) -> libc::pid_t {
     let mut result: libc::pid_t = 0;
     const XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID: u32 = 2;
 
-    let mut spec = XcbResClientIdSpecT {
+    let mut spec = xcb_res_client_id_spec_t {
         client: w as u32,
         mask: XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID,
     };
 
-    let mut e: *mut XcbGenericErrorT = core::ptr::null_mut();
+    let mut e: *mut xcb_generic_error_t = core::ptr::null_mut();
     let c: xcb_res_query_client_ids_cookie_t =
         unsafe { xcb_res_query_client_ids(globals.xcon.as_ptr(), 1, &spec) };
     let r: *mut xcb_res_query_client_ids_reply_t =
@@ -565,11 +563,10 @@ fn winpid(w: Window, globals: &Globals) -> libc::pid_t {
     if result == (-1) as libc::pid_t {
         result = 0;
     }
-
-    return result;
+    result
 }
 
-fn getparentprocess(p: libc::pid_t) -> pid_t {
+fn getparentprocess(p: libc::pid_t) -> libc::pid_t {
     let v = 0u32;
 
     let mut buf = [0i8; 256];
@@ -590,7 +587,7 @@ fn isdescprocess(p: libc::pid_t, mut c: libc::pid_t) -> i32 {
     while p != c && c != 0 {
         c = getparentprocess(c);
     }
-    c as i32
+    c
 }
 
 fn termforwin(w: NonNull<Client>, globals: &Globals) -> Option<NonNull<Client>> {
@@ -804,7 +801,6 @@ fn togglefullscreen(_arg: &Arg, globals: &mut Globals) {
     }
 }
 
-//Some sort of infinite loop here
 fn focusstack(arg: &Arg, globals: &mut Globals) {
     let mut i = stackpos(arg, globals);
     if i < 0 {
@@ -821,57 +817,6 @@ fn focusstack(arg: &Arg, globals: &mut Globals) {
     }
     focus(if c.is_some() { c } else { p }, globals);
     restack(unsafe { globals.selmon.as_ref() }, globals);
-
-    // let mut c: Option<NonNull<Client>> = None;
-    // let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
-    //     return;
-    // };
-    // let sel = unsafe { sel.as_ref() };
-    // if sel.isfullscreen && config::LOCK_FULLSCREEN {
-    //     return;
-    // }
-    // let Arg::I(ai) = arg else {
-    //     unreachable!("invalid input to focus stack")
-    // };
-    // if *ai > 0 {
-    //     c = sel.next;
-    //     while let Some(c_inner) = c
-    //         && !is_visible(c_inner)
-    //     {
-    //         c = unsafe { c_inner.as_ref().next };
-    //     }
-    //     if c.is_none() {
-    //         c = unsafe { globals.selmon.as_ref() }.clients;
-    //         while let Some(c_inner) = c
-    //             && !is_visible(c_inner)
-    //         {
-    //             c = unsafe { c_inner.as_ref() }.next;
-    //         }
-    //     }
-    // } else {
-    //     let mut i = unsafe { globals.selmon.as_ref() }.clients;
-    //     while let Some(i_inner) = i
-    //         && i != unsafe { globals.selmon.as_ref() }.sel
-    //     {
-    //         if is_visible(i_inner) {
-    //             c = i;
-    //         }
-    //         i = unsafe { i_inner.as_ref() }.next;
-    //     }
-    //     if c.is_none() {
-    //         while let Some(i_inner) = i {
-    //             if is_visible(i_inner) {
-    //                 c = i;
-    //             }
-    //             i = unsafe { i_inner.as_ref() }.next;
-    //         }
-    //     }
-    // }
-
-    // if c.is_some() {
-    //     focus(c, globals);
-    //     restack(unsafe { globals.selmon.as_ref() }, globals);
-    // }
 }
 
 fn pushstack(arg: &Arg, globals: &mut Globals) {
@@ -2558,9 +2503,7 @@ fn swallow(mut p: NonNull<Client>, mut c: NonNull<Client>, globals: &mut Globals
     p_ref.swallowing = Some(c);
     c_ref.mon = p_ref.mon;
 
-    let w = p_ref.win;
-    p_ref.win = c_ref.win;
-    c_ref.win = w;
+    std::mem::swap(&mut p_ref.win, &mut c_ref.win);
     updatetitle(p_ref, globals);
     unsafe {
         XMoveResizeWindow(
@@ -3909,7 +3852,7 @@ fn scan(globals: &mut Globals) {
     }
 }
 
-fn setup(dpy: NonNull<Display>, resources: Resources, xcon: NonNull<XcbConnectionT>) -> Globals {
+fn setup(dpy: NonNull<Display>, resources: Resources, xcon: NonNull<xcb_connection_t>) -> Globals {
     /* do not transform children into zombies when they terminate */
     let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&mut sa.sa_mask) };

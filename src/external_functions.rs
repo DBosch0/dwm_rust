@@ -393,15 +393,15 @@ unsafe extern "C" {}
 #[link(name = "xcb")]
 unsafe extern "C" {
     pub(crate) fn xcb_res_query_client_ids(
-        c: *mut XcbConnectionT,
+        c: *mut xcb_connection_t,
         num_specs: u32,
-        specs: *const XcbResClientIdSpecT,
+        specs: *const xcb_res_client_id_spec_t,
     ) -> xcb_res_query_client_ids_cookie_t;
 
     pub(crate) fn xcb_res_query_client_ids_reply(
-        c: *mut XcbConnectionT,
+        c: *mut xcb_connection_t,
         cookie: xcb_res_query_client_ids_cookie_t,
-        e: *mut *mut XcbGenericErrorT,
+        e: *mut *mut xcb_generic_error_t,
     ) -> *mut xcb_res_query_client_ids_reply_t;
 
     pub(crate) fn xcb_res_query_client_ids_ids_iterator(
@@ -413,7 +413,7 @@ unsafe extern "C" {
 }
 #[link(name = "X11-xcb")]
 unsafe extern "C" {
-    pub(crate) fn XGetXCBConnection(dpy: *mut Display) -> *mut XcbConnectionT;
+    pub(crate) fn XGetXCBConnection(dpy: *mut Display) -> *mut xcb_connection_t;
 }
 #[link(name = "xcb-res")]
 unsafe extern "C" {}
@@ -560,17 +560,18 @@ pub(crate) enum _XPrivate {}
 pub(crate) enum _XrmHashBucketRec {}
 pub(crate) type XrmDatabase = *mut _XrmHashBucketRec;
 
-pub(crate) enum XcbConnectionT {}
+#[allow(non_camel_case_types)]
+pub(crate) enum xcb_connection_t {}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub(crate) struct XcbResClientIdSpecT {
+pub(crate) struct xcb_res_client_id_spec_t {
     pub(crate) client: u32,
     pub(crate) mask: u32,
 }
 
 #[repr(C)]
-pub(crate) struct XcbGenericErrorT {
+pub(crate) struct xcb_generic_error_t {
     pub(crate) response_type: u8, /*< Type of the response */
     pub(crate) error_code: u8,    /*< Error code */
     pub(crate) sequence: u16,     /*< Sequence number */
@@ -599,7 +600,7 @@ pub(crate) struct xcb_res_query_client_ids_reply_t {
 
 #[repr(C)]
 pub(crate) struct xcb_res_client_id_value_t {
-    pub(crate) spec: XcbResClientIdSpecT,
+    pub(crate) spec: xcb_res_client_id_spec_t,
     pub(crate) length: u32,
 }
 
