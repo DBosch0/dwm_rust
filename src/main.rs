@@ -569,7 +569,6 @@ fn winpid(w: Window, globals: &Globals) -> libc::pid_t {
     return result;
 }
 
-//TODO maybe rustify?
 fn getparentprocess(p: libc::pid_t) -> pid_t {
     let v = 0u32;
 
@@ -1112,10 +1111,7 @@ fn resource_load(db: XrmDatabase, name: &str, value: &mut ResourceVal) {
             }
         }
     }
-    //TODO: check if we need to free manually here. C code does not but it seems correct.
-    if !r#type.is_null() {
-        unsafe { XFree(r#type as *mut c_void) };
-    }
+    // type points into XrmDatabase's internal memory — must not be freed.
 }
 
 fn load_xresources() -> Resources {
@@ -1719,12 +1715,11 @@ fn destroynotify(ev: &mut XEvent, globals: &mut Globals) {
     if let Some(c) = wintoclient(ev.window, globals) {
         unmanage(c, true, globals);
     } else if let Some(c) = swallowingclient(ev.window, globals) {
-        //TODO check that we can use expect in this case.
         unmanage(
             unsafe {
                 c.as_ref()
                     .swallowing
-                    .expect("should be Some in this cas if returned from swallowing client")
+                    .expect("swallowingclient only returns c when c.swallowing.is_some()")
             },
             true,
             globals,
@@ -3796,14 +3791,13 @@ fn unmanage(c: NonNull<Client>, destroyed: bool, globals: &mut Globals) {
         return;
     }
 
-    //TODO check assumptions here, that we can always expect on the value of s.
     let s: Option<NonNull<Client>> = swallowingclient(unsafe { c.as_ref().win }, globals);
     if let Some(mut s) = s {
         let swallowing = unsafe {
             s.as_mut()
                 .swallowing
                 .take()
-                .expect("should have a swallowed field in this case")
+                .expect("swallowingclient only returns s when s.swallowing.is_some()")
         };
         let _ = unsafe { Box::from_raw(swallowing.as_ptr()) };
         arrange(Some(m), globals);
