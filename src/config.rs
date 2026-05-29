@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 use crate::{
-    Button, ClickState, Key, Layout, ResourceConfig, ResourceValConfig, Rule,
+    Button, ClickState, Key, Layout, ResourceConfig, ResourceValConfig, Rule, ScratchPad,
     external_functions::{
         BUTTON1, BUTTON2, BUTTON3, CONTROL_MASK, MOD1_MASK, SHIFT_MASK, keycodes::*,
     },
+    sptag,
 };
 
+pub const TERMINAL: &str = "st";
 pub const TERM_CLASS: &str = "St";
 
 /* appearance */
@@ -39,6 +41,11 @@ pub const COLORS: &[[&str; 3]] = &[
     ["NORM_FG_COLOR", "NORM_BG_COLOR", "NORM_BORDER_COLOR"], // SchemNorm (0)
     ["SEL_FG_COLOR", "SEL_BG_COLOR", "SEL_BORDER_COLOR"],    // SchemeSel (1)
 ];
+
+pub const SCRATCHPADS: &[ScratchPad] = &[ScratchPad {
+    name: "spterm",
+    cmd: &[TERMINAL, "-n", "spterm", "-g", "12x3"],
+}];
 
 //Tagging
 pub const TAGS: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8", "9"];
@@ -82,6 +89,16 @@ pub const RULES: &[Rule] = &[
         title: "",
         tags: 1 << 7,
         isfloating: false,
+        isterminal: true,
+        noswallow: false,
+        monitor: -1,
+    },
+    Rule {
+        class: TERM_CLASS,
+        instance: SCRATCHPADS[0].name,
+        title: "",
+        tags: sptag(0),
+        isfloating: true,
         isterminal: true,
         noswallow: false,
         monitor: -1,
@@ -283,7 +300,7 @@ pub const KEYS: &[Key] = &[
         arg: crate::Arg::Command(DMENUCMD),
     },
     Key {
-        r#mod: MODKEY | SHIFT_MASK,
+        r#mod: MODKEY,
         keysym: XK_Return,
         func: Some(crate::spawn),
         arg: crate::Arg::Command(TERMCD),
@@ -319,7 +336,7 @@ pub const KEYS: &[Key] = &[
         arg: crate::Arg::F(0.05),
     },
     Key {
-        r#mod: MODKEY,
+        r#mod: MODKEY | CONTROL_MASK,
         keysym: XK_Return,
         func: Some(crate::zoom),
         arg: crate::Arg::I(0),
@@ -479,6 +496,12 @@ pub const KEYS: &[Key] = &[
         keysym: XK_semicolon,
         func: Some(crate::shifttagclients),
         arg: crate::Arg::I(-1),
+    },
+    Key {
+        r#mod: MODKEY | SHIFT_MASK,
+        keysym: XK_Return,
+        func: Some(crate::togglescratch),
+        arg: crate::Arg::Ui(0),
     },
     // The '1' key
     Key {

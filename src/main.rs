@@ -21,8 +21,10 @@ mod util;
 mod vanitygaps;
 
 const VERSION: &str = "0.0.1";
-const TAGMASK: u32 = (1 << config::TAGS.len() as u32) - 1;
+const NUMTAGS: u32 = (config::TAGS.len() + config::SCRATCHPADS.len()) as u32;
+const TAGMASK: u32 = (1 << NUMTAGS) - 1;
 const BUTTON_MASK: i64 = BUTTON_PRESS_MASK | BUTTON_RELEASE_MASK;
+const SPTAGMASK: u32 = ((1 << config::SCRATCHPADS.len()) as u32 - 1) << config::TAGS.len() as u32;
 const MOUSE_MASK: i64 = BUTTON_MASK | POINTER_MOTION_MASK;
 const PREV_SEL: i32 = 3000;
 
@@ -187,6 +189,11 @@ struct ResourceConfig {
 
 type Resources = HashMap<&'static str, ResourceVal>;
 
+struct ScratchPad {
+    name: &'static str,
+    cmd: &'static [&'static str],
+}
+
 struct Monitor {
     ltsymbol: [i8; 16],
     mfact: f32,
@@ -253,6 +260,11 @@ fn text_w(x: *const i8, globals: &mut Globals) -> i32 {
 fn cleanmask(mask: u32, globals: &Globals) -> u32 {
     mask & !(globals.numlockmask | LOCK_MASK)
         & (SHIFT_MASK | CONTROL_MASK | MOD1_MASK | MOD2_MASK | MOD3_MASK | MOD4_MASK | MOD5_MASK)
+}
+
+#[inline(always)]
+const fn sptag(i: u32) -> u32 {
+    (1 << config::TAGS.len() as u32) << i
 }
 
 #[inline(always)]
@@ -414,10 +426,9 @@ fn monocle(m: &mut Monitor, globals: &mut Globals) {
 
 fn view(arg: &Arg, globals: &mut Globals) {
     let Arg::Ui(ui) = arg else { unreachable!() };
-    if *ui & TAGMASK
-        == unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize]
-    {
+    let cur = unsafe { globals.selmon.as_ref() }.tagset
+        [unsafe { globals.selmon.as_ref() }.seltags as usize];
+    if *ui & TAGMASK == cur {
         return;
     }
     unsafe { globals.selmon.as_mut() }.seltags ^= 1; /* toggle sel tagset */
@@ -478,6 +489,46 @@ fn toggletag(arg: &Arg, globals: &mut Globals) {
     }
 }
 
+fn togglescratch(arg: &Arg, globals: &mut Globals) {
+    let mut found = false;
+    let Arg::Ui(ui) = arg else {
+        unreachable!("invalid argument given to togglescratch function")
+    };
+    let scratchtag = sptag(*ui);
+    let sparg = Arg::Command(config::SCRATCHPADS[*ui as usize].cmd);
+
+    let mut c = unsafe { globals.selmon.as_ref().clients };
+    while let Some(ci) = c {
+        found = unsafe { ci.as_ref().tags } & scratchtag != 0;
+        if found {
+            break;
+        }
+        c = unsafe { ci.as_ref().next }
+    }
+    if found {
+        let Some(c) = c else {
+            unreachable!("we are the the found branch")
+        };
+        let tagset = unsafe { globals.selmon.as_ref().tagset }
+            [unsafe { globals.selmon.as_ref().seltags } as usize];
+        let newtagset = tagset ^ scratchtag;
+        if newtagset != 0 {
+            let seltags_idx = unsafe { globals.selmon.as_ref().seltags } as usize;
+            unsafe { globals.selmon.as_mut().tagset[seltags_idx] = newtagset };
+            focus(None, globals);
+            arrange(Some(globals.selmon), globals);
+        }
+        if is_visible(c) {
+            focus(Some(c), globals);
+            restack(unsafe { globals.selmon.as_ref() }, globals);
+        }
+    } else {
+        let seltags_idx = unsafe { globals.selmon.as_ref().seltags } as usize;
+        unsafe { globals.selmon.as_mut().tagset[seltags_idx] |= scratchtag };
+        spawn(&sparg, globals);
+    }
+}
+
 fn winpid(w: Window, globals: &Globals) -> libc::pid_t {
     let mut result: libc::pid_t = 0;
     const XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID: u32 = 2;
@@ -522,7 +573,6 @@ fn winpid(w: Window, globals: &Globals) -> libc::pid_t {
 fn getparentprocess(p: libc::pid_t) -> pid_t {
     let v = 0u32;
 
-    // FILE *f;
     let mut buf = [0i8; 256];
     let cstr = CString::new(format!("/proc/{}/stat", p as u32)).expect("valid CString");
     unsafe { libc::snprintf(buf.as_mut_ptr(), buf.len() - 1, cstr.as_ptr()) };
@@ -1062,7 +1112,7 @@ fn resource_load(db: XrmDatabase, name: &str, value: &mut ResourceVal) {
             }
         }
     }
-    //TODO maybe necessary
+    //TODO: check if we need to free manually here. C code does not but it seems correct.
     if !r#type.is_null() {
         unsafe { XFree(r#type as *mut c_void) };
     }
@@ -1568,11 +1618,16 @@ fn configurerequest(ev: &mut XEvent, globals: &mut Globals) {
                 c_ref.oldh = c_ref.h;
                 c_ref.h = ev.height;
             }
-            if (c_ref.x + c_ref.w) > m.mx + m.mw && c_ref.isfloating {
-                c_ref.x = m.mx + (m.mw / 2 - c_ref.width() / 2); /* center in x direction */
-            }
-            if (c_ref.y + c_ref.h) > m.my + m.mh && c_ref.isfloating {
-                c_ref.y = m.my + (m.mh / 2 - c_ref.height() / 2); /* center in y direction */
+            if (c_ref.tags & SPTAGMASK) != 0 && c_ref.isfloating {
+                c_ref.x = m.wx + (m.ww / 2 - c_ref.width() / 2);
+                c_ref.y = m.wy + (m.wh / 2 - c_ref.height() / 2);
+            } else {
+                if (c_ref.x + c_ref.w) > m.mx + m.mw && c_ref.isfloating {
+                    c_ref.x = m.mx + (m.mw / 2 - c_ref.width() / 2); /* center in x direction */
+                }
+                if (c_ref.y + c_ref.h) > m.my + m.mh && c_ref.isfloating {
+                    c_ref.y = m.my + (m.mh / 2 - c_ref.height() / 2); /* center in y direction */
+                }
             }
             if (vm & (CWX | CWY)) != 0 && (vm & (CW_WIDTH | CW_HEIGHT)) == 0 {
                 configure(c_ref, globals);
@@ -1664,7 +1719,7 @@ fn destroynotify(ev: &mut XEvent, globals: &mut Globals) {
     if let Some(c) = wintoclient(ev.window, globals) {
         unmanage(c, true, globals);
     } else if let Some(c) = swallowingclient(ev.window, globals) {
-        //TODO check this case.
+        //TODO check that we can use expect in this case.
         unmanage(
             unsafe {
                 c.as_ref()
@@ -2908,6 +2963,14 @@ fn applyrules(c: &mut Client, globals: &Globals) {
             c.noswallow = r.noswallow;
             c.isfloating = r.isfloating;
             c.tags |= r.tags;
+
+            if r.tags & SPTAGMASK != 0 && r.isfloating {
+                c.x = unsafe { c.mon.as_ref().wx }
+                    + (unsafe { c.mon.as_ref().ww } / 2 - c.width() / 2);
+                c.y = unsafe { c.mon.as_ref().wy }
+                    + (unsafe { c.mon.as_ref().wh } / 2 - c.height() / 2);
+            }
+
             let mut m = Some(globals.mons);
             while let Some(m_inner) = m
                 && unsafe { m_inner.as_ref().num } != r.monitor
@@ -2930,7 +2993,7 @@ fn applyrules(c: &mut Client, globals: &Globals) {
     c.tags = if c.tags & TAGMASK != 0 {
         c.tags & TAGMASK
     } else {
-        (unsafe { c.mon.as_ref().tagset })[unsafe { c.mon.as_ref().seltags } as usize]
+        (unsafe { c.mon.as_ref().tagset })[unsafe { c.mon.as_ref().seltags } as usize] & !SPTAGMASK
     };
 }
 
@@ -3216,8 +3279,15 @@ fn resize(
 
 fn showhide(c: Option<NonNull<Client>>, globals: &Globals) {
     let Some(mut c) = c else { return };
-    let c_ref = unsafe { c.as_ref() };
-    if is_visible(c) {
+    let c_ref = unsafe { c.as_mut() };
+    let vis = is_visible(c);
+    if vis {
+        if (c_ref.tags & SPTAGMASK) != 0 && c_ref.isfloating {
+            c_ref.x = unsafe { c_ref.mon.as_ref().wx }
+                + (unsafe { c_ref.mon.as_ref().ww } / 2 - c_ref.width() / 2);
+            c_ref.y = unsafe { c_ref.mon.as_ref().wy }
+                + (unsafe { c_ref.mon.as_ref().wh } / 2 - c_ref.height() / 2);
+        }
         /* show clients top down */
         unsafe { XMoveWindow(globals.dpy.as_ptr(), c_ref.win, c_ref.x, c_ref.y) };
         if (unsafe { c_ref.mon.as_ref() }.lt[unsafe { c_ref.mon.as_ref() }.sellt as usize]
@@ -3726,7 +3796,7 @@ fn unmanage(c: NonNull<Client>, destroyed: bool, globals: &mut Globals) {
         return;
     }
 
-    //TODO check assumptions here;
+    //TODO check assumptions here, that we can always expect on the value of s.
     let s: Option<NonNull<Client>> = swallowingclient(unsafe { c.as_ref().win }, globals);
     if let Some(mut s) = s {
         let swallowing = unsafe {
@@ -3776,7 +3846,7 @@ fn unmanage(c: NonNull<Client>, destroyed: bool, globals: &mut Globals) {
         let _ = Box::from_raw(c.as_ptr());
     }
     //NOTE: swallowing patch has a check here if to only run this is s is none
-    //but is s is some we will have returned already above. So not possible for
+    //but if s is some we will have returned already above. So not possible for
     //s to not be none in this case.
     focus(None, globals);
     updateclientlist(globals);
