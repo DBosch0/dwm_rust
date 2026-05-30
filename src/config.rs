@@ -9,6 +9,7 @@ use crate::{
 
 pub const TERMINAL: &str = "st";
 pub const TERM_CLASS: &str = "St";
+pub const STATUS_BAR: &str = "dwmblocks";
 
 /* appearance */
 pub const BORDER_PX_DEFAULT: u32 = 3; /* border pixel of windows */
@@ -44,7 +45,7 @@ pub const COLORS: &[[&str; 3]] = &[
 
 pub const SCRATCHPADS: &[ScratchPad] = &[ScratchPad {
     name: "spterm",
-    cmd: &[TERMINAL, "-n", "spterm", "-g", "12x3"],
+    cmd: &[TERMINAL, "-n", "spterm", "-g", "120x34"],
 }];
 
 //Tagging

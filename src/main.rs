@@ -306,6 +306,7 @@ type HandlerFunction = fn(&mut XEvent, &mut Globals);
 // dwm is single-threaded; Relaxed ordering is sufficient.
 // Written once in checkotherwm before any X error can occur;
 // read only in xerror thereafter.
+// TODO: move into globals?
 static XERRORXLIB: AtomicUsize = AtomicUsize::new(0);
 const BROKEN: &CStr = c"broken";
 // Indexed by X11 event type (0..LAST_EVENT). X11 event types start at 2;
@@ -374,6 +375,9 @@ struct Globals {
     last_motion_mon: Option<NonNull<Monitor>>,
     resources: Resources,
     xcon: NonNull<xcb_connection_t>,
+    statusw: i32,
+    statussig: i32,
+    statuspid: libc::pid_t,
 }
 
 fn nexttiled(mut c: Option<NonNull<Client>>) -> Option<NonNull<Client>> {
@@ -1448,12 +1452,32 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
             )
         {
             click = ClickState::LtSymbol
-        } else if ev.x
-            > unsafe { globals.selmon.as_ref() }.ww - text_w(globals.stext.as_ptr(), globals)
-                + globals.lrpad
-                - 2
-        {
+        } else if ev.x > unsafe { globals.selmon.as_ref() }.ww - globals.statusw {
+            x = unsafe { globals.selmon.as_ref() }.ww - globals.statusw;
             click = ClickState::StatusText;
+            globals.statussig = 0;
+            let mut text = globals.stext.as_mut_ptr();
+            let mut s = globals.stext.as_mut_ptr();
+            while unsafe { *s } != 0 && x <= ev.x {
+                // for (text = s = stext; *s && x <= ev->x; s++) {
+                if ((unsafe { *s }) as u8) < b' ' {
+                    let ch = unsafe { *s };
+                    unsafe { *s = b'\0' as i8 };
+                    x += text_w(text, globals) - globals.lrpad;
+                    unsafe { *s = ch };
+                    text = unsafe { s.add(1) };
+                    if x >= ev.x {
+                        break;
+                    }
+                    /* End clickable section on a matching signal raw byte */
+                    if globals.statussig == ch as i32 {
+                        globals.statussig = 0;
+                    } else {
+                        globals.statussig = ch as i32;
+                    }
+                }
+                s = unsafe { s.add(1) };
+            }
         } else {
             click = ClickState::WinTitle
         }
@@ -2184,21 +2208,55 @@ fn drawbar(m: &Monitor, globals: &mut Globals) {
             .drw
             .setscheme(Rc::clone(&globals.scheme[SchemeState::Norm as usize]));
 
-        tw = globals
-            .drw
-            .as_mut()
-            .fontset_getwidth(&globals.stext as *const i8) as i32
-            + 2; /* 2px right padding */
-
+        // tw = globals
+        //     .drw
+        //     .as_mut()
+        //     .fontset_getwidth(&globals.stext as *const i8) as i32
+        //     + 2; /* 2px right padding */
+        // globals.drw.text(
+        //     m.ww - tw,
+        //     0,
+        //     tw as u32,
+        //     globals.bh as u32,
+        //     0,
+        //     &globals.stext as *const i8,
+        //     false,
+        // );
+        let mut text = globals.stext.as_mut_ptr();
+        let mut s = globals.stext.as_mut_ptr();
+        let mut x = 0;
+        while unsafe { *s } != 0 {
+            // for (text = s = stext; *s; s++) {
+            if (unsafe { *s } as u8) < b' ' {
+                let ch = unsafe { *s };
+                unsafe { *s = b'\0' as i8 };
+                tw = text_w(text, globals) - globals.lrpad;
+                globals.drw.text(
+                    m.ww - globals.statusw + x,
+                    0,
+                    tw as u32,
+                    globals.bh as u32,
+                    0,
+                    text,
+                    false,
+                );
+                x += tw;
+                unsafe { *s = ch };
+                text = unsafe { s.add(1) };
+            }
+            s = unsafe { s.add(1) };
+        }
+        tw = text_w(text, globals) - globals.lrpad + 2;
         globals.drw.text(
-            m.ww - tw,
+            m.ww - globals.statusw + x,
             0,
             tw as u32,
             globals.bh as u32,
             0,
-            &globals.stext as *const i8,
+            text,
             false,
         );
+        tw = globals.statusw;
     }
     let mut c = m.clients;
     while let Some(c_inner) = c {
@@ -2303,6 +2361,61 @@ fn drawbars(globals: &mut Globals) {
     }
 }
 
+fn getstatusbarpid(globals: &mut Globals) -> libc::pid_t {
+    let mut buf = [0i8; 32];
+    let mut s = buf.as_mut_ptr();
+    let mut fp: *mut libc::FILE;
+
+    if globals.statuspid > 0 {
+        let cstr =
+            CString::new(format!("/proc/{}/cmdline", globals.statuspid)).expect("valid CString");
+        unsafe { libc::snprintf(buf.as_mut_ptr(), buf.len(), cstr.as_ptr()) };
+        fp = unsafe { libc::fopen(buf.as_mut_ptr(), c"r".as_ptr()) };
+        if !fp.is_null() {
+            unsafe { libc::fgets(buf.as_mut_ptr(), buf.len() as i32, fp) };
+            let mut c = unsafe { libc::strchr(s, b'/' as i32) };
+            while !c.is_null() {
+                s = unsafe { c.add(1) };
+                c = unsafe { libc::strchr(s, b'/' as i32) };
+            }
+            unsafe { libc::fclose(fp) };
+            let status_bar = CString::new(config::STATUS_BAR).expect("valid CString");
+            if unsafe { libc::strcmp(s, status_bar.as_ptr()) } == 0 {
+                return globals.statuspid;
+            }
+        }
+    }
+    let pid_of_cstr =
+        CString::new(format!("pidof -s {}", config::STATUS_BAR)).expect("valid CString");
+    fp = unsafe { libc::popen(pid_of_cstr.as_ptr(), c"r".as_ptr()) };
+    if fp.is_null() {
+        return -1;
+    }
+    unsafe {
+        libc::fgets(buf.as_mut_ptr(), buf.len() as i32, fp);
+        libc::pclose(fp);
+        libc::strtol(buf.as_ptr(), core::ptr::null_mut(), 10) as libc::pid_t
+    }
+}
+
+fn sigstatusbar(arg: &Arg, globals: &mut Globals) {
+    let mut sv: libc::sigval = unsafe { core::mem::zeroed() };
+
+    if globals.statussig == 0 {
+        return;
+    }
+    let Arg::I(i) = arg else {
+        unreachable!("invalid argument to sigstatusbar")
+    };
+    sv.sival_ptr = (*i) as *mut c_void;
+    let statuspid = getstatusbarpid(globals);
+    if statuspid <= 0 {
+        return;
+    }
+
+    unsafe { libc::sigqueue(statuspid, libc::SIGRTMIN() + globals.statussig, sv) };
+}
+
 fn updatestatus(globals: &mut Globals) {
     if !gettextprop(
         globals.root,
@@ -2319,6 +2432,23 @@ fn updatestatus(globals: &mut Globals) {
                     .as_ptr(),
             )
         };
+        globals.statusw = text_w(globals.stext.as_mut_ptr(), globals) - globals.lrpad + 2;
+    } else {
+        globals.statusw = 0;
+        let mut text = globals.stext.as_mut_ptr();
+        let mut s = globals.stext.as_mut_ptr();
+        while unsafe { *s } != 0 {
+            // for (text = s = stext; *s; s++) {
+            if (unsafe { *s } as u8) < b' ' {
+                let ch = unsafe { *s };
+                unsafe { *s = '\0' as i8 };
+                globals.statusw += text_w(text, globals) - globals.lrpad;
+                unsafe { *s = ch };
+                text = unsafe { s.add(1) };
+            }
+            s = unsafe { s.add(1) };
+        }
+        globals.statusw += text_w(text, globals) - globals.lrpad + 2;
     }
 
     drawbar(unsafe { globals.selmon.as_ref() }, globals);
@@ -3899,6 +4029,9 @@ fn setup(dpy: NonNull<Display>, resources: Resources, xcon: NonNull<xcb_connecti
         last_motion_mon: None,
         resources,
         xcon,
+        statusw: 0,
+        statussig: 0,
+        statuspid: -1 as libc::pid_t,
     };
 
     updategeom(&mut globals);
