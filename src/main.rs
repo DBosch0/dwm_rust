@@ -263,43 +263,19 @@ const fn sptag(i: u32) -> u32 {
     (1 << config::TAGS.len() as u32) << i
 }
 
-#[inline(always)]
-fn load_resource_int(name: &str, globals: &Globals) -> u32 {
-    let ResourceVal::Integer(u) = globals
-        .resources
-        .get(name)
-        .unwrap_or_else(|| panic!("{} is in the resouces map", name))
-    else {
-        unreachable!("invalid type of {} variable in Resources map", name);
-    };
-    *u
+#[macro_export]
+macro_rules! load_resource {
+    ($name:expr, $globals:expr, $variant:ident) => {{
+        let crate::ResourceVal::$variant(value) = $globals
+            .resources
+            .get($name)
+            .unwrap_or_else(|| panic!("{} is not in the resources map", $name))
+        else {
+            unreachable!("invalid type of variable {} in Resources map", $name);
+        };
+        *value
+    }};
 }
-
-#[inline(always)]
-fn load_resource_bool(name: &str, globals: &Globals) -> bool {
-    let ResourceVal::Bool(b) = globals
-        .resources
-        .get(name)
-        .unwrap_or_else(|| panic!("{} is in the resouces map", name))
-    else {
-        unreachable!("invalid type of {} variable in Resources map", name);
-    };
-    *b
-}
-
-#[inline(always)]
-fn load_resource_float(name: &str, globals: &Globals) -> f32 {
-    let ResourceVal::Float(f) = globals
-        .resources
-        .get(name)
-        .unwrap_or_else(|| panic!("{} is in the resouces map", name))
-    else {
-        unreachable!("invalid type of {} variable in Resources map", name);
-    };
-    *f
-}
-
-//
 
 type HandlerFunction = fn(&mut XEvent, &mut Globals);
 
@@ -1206,7 +1182,8 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
                 let mut nx = ocx + (unsafe { ev.xmotion.x } - x);
                 let mut ny = ocy + (unsafe { ev.xmotion.y } - y);
 
-                let snap = load_resource_int("SNAP", globals);
+                // let snap = load_resource_int("SNAP", globals);
+                let snap = load_resource!("SNAP", globals, Integer);
 
                 if (unsafe { globals.selmon.as_ref().wx } - nx).abs() < snap as i32 {
                     nx = unsafe { globals.selmon.as_ref().wx };
@@ -1339,7 +1316,8 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
                 let nw = 1.max(unsafe { ev.xmotion.x } - ocx - 2 * cr.bw + 1);
                 let nh = 1.max(unsafe { ev.xmotion.y } - ocy - 2 * cr.bw + 1);
 
-                let snap = load_resource_int("SNAP", globals);
+                // let snap = load_resource_int("SNAP", globals);
+                let snap = load_resource!("SNAP", globals, Integer);
 
                 if unsafe { cr.mon.as_ref().wx } + nw >= unsafe { globals.selmon.as_ref().wx }
                     && unsafe { cr.mon.as_ref().wx } + nw
@@ -1920,8 +1898,8 @@ fn createmon(globals: &Globals) -> NonNull<Monitor> {
 
     let m: Box<Monitor> = Box::new(Monitor {
         ltsymbol: ltsym,
-        mfact: load_resource_float("M_FACT", globals),
-        nmaster: load_resource_int("N_MASTER", globals) as i32,
+        mfact: load_resource!("M_FACT", globals, Float),
+        nmaster: load_resource!("N_MASTER", globals, Integer) as i32,
         num: 0,
         by: 0,
         mx: 0,
@@ -1932,15 +1910,15 @@ fn createmon(globals: &Globals) -> NonNull<Monitor> {
         wy: 0,
         ww: 0,
         wh: 0,
-        gappih: load_resource_int("GAPP_IH", globals) as i32,
-        gappiv: load_resource_int("GAPP_IV", globals) as i32,
-        gappoh: load_resource_int("GAPP_OH", globals) as i32,
-        gappov: load_resource_int("GAPP_OV", globals) as i32,
+        gappih: load_resource!("GAPP_IH", globals, Integer) as i32,
+        gappiv: load_resource!("GAPP_IV", globals, Integer) as i32,
+        gappoh: load_resource!("GAPP_OH", globals, Integer) as i32,
+        gappov: load_resource!("GAPP_OV", globals, Integer) as i32,
         seltags: 0,
         sellt: 0,
         tagset: [1, 1],
-        showbar: load_resource_bool("SHOW_BAR", globals),
-        topbar: load_resource_bool("TOP_BAR", globals),
+        showbar: load_resource!("SHOW_BAR", globals, Bool),
+        topbar: load_resource!("TOP_BAR", globals, Bool),
         clients: None,
         sel: None,
         stack: None,
@@ -2618,7 +2596,7 @@ fn swallow(mut p: NonNull<Client>, mut c: NonNull<Client>, globals: &mut Globals
     if c_ref.noswallow || c_ref.isterminal {
         return;
     }
-    if c_ref.noswallow && !load_resource_bool("SWALLOW_FLOATING", globals) && c_ref.isfloating {
+    if c_ref.noswallow && !load_resource!("SWALLOW_FLOATING", globals, Bool) && c_ref.isfloating {
         return;
     }
 
@@ -3189,7 +3167,7 @@ fn applysizehints(
         *w = globals.bh;
     }
     // m_lt_has_arrange reflects m.lt[sellt].arrange.is_none() read before any mutation
-    if load_resource_bool("RESIZE_HINTS", globals) || c.isfloating || m_lt_has_arrange {
+    if load_resource!("RESIZE_HINTS", globals, Bool) || c.isfloating || m_lt_has_arrange {
         if !c.hintsvalid {
             updatesizehints(c, globals)
         }
@@ -3751,7 +3729,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
     }
     c_ref.x = c_ref.x.max(unsafe { c_ref.mon.as_ref() }.wx);
     c_ref.y = c_ref.y.max(unsafe { c_ref.mon.as_ref() }.wy);
-    c_ref.bw = load_resource_int("BORDER_PX", globals) as i32;
+    c_ref.bw = load_resource!("BORDER_PX", globals, Integer) as i32;
 
     wc.border_width = c_ref.bw;
 

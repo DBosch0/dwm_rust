@@ -39,10 +39,10 @@ pub(crate) fn togglegaps(_arg: &Arg, globals: &mut Globals) {
 #[allow(dead_code)]
 pub(crate) fn defaultgaps(_arg: &Arg, globals: &mut Globals) {
     setgaps(
-        crate::load_resource_int("GAPP_OH", globals) as i32,
-        crate::load_resource_int("GAPP_OV", globals) as i32,
-        crate::load_resource_int("GAPP_IH", globals) as i32,
-        crate::load_resource_int("GAPP_IV", globals) as i32,
+        crate::load_resource!("GAPP_OH", globals, Integer) as i32,
+        crate::load_resource!("GAPP_OV", globals, Integer) as i32,
+        crate::load_resource!("GAPP_IH", globals, Integer) as i32,
+        crate::load_resource!("GAPP_IV", globals, Integer) as i32,
         globals,
     );
 }
@@ -140,7 +140,7 @@ pub(crate) fn getgaps(m: &Monitor, globals: &mut Globals) -> (i32, i32, i32, i32
         c = crate::nexttiled(unsafe { c_inner.as_ref() }.next);
         n += 1;
     }
-    if crate::load_resource_bool("SMART_GAPS", globals) && n == 1 {
+    if crate::load_resource!("SMART_GAPS", globals, Bool) && n == 1 {
         oe = 0;
     }
     (
