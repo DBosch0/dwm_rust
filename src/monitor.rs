@@ -457,22 +457,75 @@ impl Monitor {
         }
         done
     }
+
+    pub(crate) fn getgaps(&self, globals: &mut Globals) -> (i32, i32, i32, i32, u32) {
+        let ie = globals.enable_gaps as i32;
+        let mut oe = ie;
+        let mut n = 0;
+        let mut c = Client::nexttiled(self.clients);
+        while let Some(c_inner) = c {
+            c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+            n += 1;
+        }
+        if crate::load_resource!("SMART_GAPS", globals, Bool) && n == 1 {
+            oe = 0;
+        }
+        (
+            self.gappoh * oe,
+            self.gappov * oe,
+            self.gappih * ie,
+            self.gappiv * ie,
+            n,
+        )
+    }
+
+    pub(crate) fn getfacts(&self, msize: i32, ssize: i32) -> (f32, f32, i32, i32) {
+        let mut mfacts = 0.0;
+        let mut sfacts = 0.0;
+        let mut mtotal = 0;
+        let mut stotal = 0;
+
+        let mut n = 0;
+        let mut c = Client::nexttiled(self.clients);
+        while let Some(c_inner) = c {
+            if n < self.nmaster {
+                mfacts += unsafe { c_inner.as_ref() }.cfact;
+            } else {
+                sfacts += unsafe { c_inner.as_ref() }.cfact;
+            }
+            c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+            n += 1;
+        }
+        n = 0;
+        c = Client::nexttiled(self.clients);
+        while let Some(c_inner) = c {
+            if n < self.nmaster {
+                mtotal += msize * ((unsafe { c_inner.as_ref() }.cfact / mfacts) as i32);
+            } else {
+                stotal += ssize * ((unsafe { c_inner.as_ref() }.cfact / sfacts) as i32);
+            }
+            c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+            n += 1
+        }
+
+        (
+            mfacts,         // total factor of master area
+            sfacts,         // total factor of stack area
+            msize - mtotal, // the remainder (rest) of pixels after a cfacts master split
+            ssize - stotal, // the remainder (rest) of pixels after a cfacts stack split
+        )
+    }
 }
 
 pub(crate) mod layouts {
     use std::ffi::CString;
 
-    use crate::{
-        Globals,
-        client::Client,
-        monitor::Monitor,
-        vanitygaps::{getfacts, getgaps},
-    };
+    use crate::{Globals, client::Client, monitor::Monitor};
 
     pub(crate) type LayoutFunction = fn(&mut super::Monitor, &mut super::Globals);
 
     pub(crate) fn bstack(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -493,7 +546,7 @@ pub(crate) mod layouts {
             sy = my + mh + ih;
         }
 
-        let (mfacts, sfacts, mrest, srest) = getfacts(m, mw, sw);
+        let (mfacts, sfacts, mrest, srest) = m.getfacts(mw, sw);
 
         let mut i = 0;
         let mut c = Client::nexttiled(m.clients);
@@ -531,7 +584,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn bstackhoriz(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -552,7 +605,7 @@ pub(crate) mod layouts {
             sh = m.wh - mh - 2 * oh - ih * (n as i32 - m.nmaster);
         }
 
-        let (mfacts, sfacts, mrest, srest) = getfacts(m, mw, sh);
+        let (mfacts, sfacts, mrest, srest) = m.getfacts(mw, sh);
 
         let mut i = 0;
         let mut c = Client::nexttiled(m.clients);
@@ -590,7 +643,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -739,7 +792,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn centeredfloatingmaster(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, _ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, _ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -776,7 +829,7 @@ pub(crate) mod layouts {
             sh = m.wh - 2 * oh;
         }
 
-        let (mfacts, sfacts, mrest, srest) = getfacts(m, mw, sw);
+        let (mfacts, sfacts, mrest, srest) = m.getfacts(mw, sw);
         let mut i = 0;
         let mut c = Client::nexttiled(m.clients);
         while let Some(mut ci) = c {
@@ -815,7 +868,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn deck(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -835,7 +888,7 @@ pub(crate) mod layouts {
             sh = m.wh - 2 * oh;
         }
 
-        let (mfacts, _sfacts, mrest, _srest) = getfacts(m, mh, sh);
+        let (mfacts, _sfacts, mrest, _srest) = m.getfacts(mh, sh);
 
         if n as i32 - m.nmaster > 0 {
             /* override layout symbol */
@@ -876,7 +929,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn fibonacci(m: &mut Monitor, s: bool, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -978,7 +1031,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn gaplessgrid(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -1036,7 +1089,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn grid(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
 
         /* grid dimensions */
         let mut rows = 0;
@@ -1084,7 +1137,7 @@ pub(crate) mod layouts {
 
     pub(crate) fn horizgrid(m: &mut Monitor, globals: &mut Globals) {
         /* Count windows */
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -1187,7 +1240,7 @@ pub(crate) mod layouts {
         let mut rows = m.nmaster + 1;
 
         /* count clients */
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
 
         /* nothing to do here */
         if n == 0 {
@@ -1245,7 +1298,7 @@ pub(crate) mod layouts {
     }
 
     pub(crate) fn tile(m: &mut Monitor, globals: &mut Globals) {
-        let (oh, ov, ih, iv, n) = getgaps(m, globals);
+        let (oh, ov, ih, iv, n) = m.getgaps(globals);
         if n == 0 {
             return;
         }
@@ -1264,7 +1317,7 @@ pub(crate) mod layouts {
             sx = mx + mw + iv;
         }
 
-        let (mfacts, sfacts, mrest, srest) = getfacts(m, mh, sh);
+        let (mfacts, sfacts, mrest, srest) = m.getfacts(mh, sh);
 
         let mut i = 0;
         let mut c = Client::nexttiled(m.clients);
