@@ -139,7 +139,7 @@ impl Client {
                 );
             }
             self.issticky = false;
-            crate::arrange(Some(self.mon), globals);
+            Monitor::arrange(Some(self.mon), globals);
         }
     }
 
@@ -205,7 +205,7 @@ impl Client {
             self.h = self.oldh;
             // let (x, y, w, h, mon) = (self.x, self.y, self.w, self.h, self.mon);
             self.resizeclient(self.x, self.y, self.w, self.h, globals);
-            crate::arrange(Some(self.mon), globals);
+            Monitor::arrange(Some(self.mon), globals);
         }
     }
 
@@ -696,7 +696,7 @@ impl Client {
                     .expect("swallowingclient only returns s when s.swallowing.is_some()")
             };
             let _ = unsafe { Box::from_raw(swallowing.as_ptr()) };
-            crate::arrange(Some(m), globals);
+            Monitor::arrange(Some(m), globals);
             Client::focus(None, globals);
             return;
         }
@@ -740,7 +740,7 @@ impl Client {
         //s to not be none in this case.
         Client::focus(None, globals);
         updateclientlist(globals);
-        crate::arrange(Some(m), globals);
+        Monitor::arrange(Some(m), globals);
     }
 
     pub(crate) fn setclientstate(&self, state: i64, globals: &Globals) {
@@ -938,7 +938,7 @@ impl Client {
                 p_ref.h as u32,
             )
         };
-        crate::arrange(Some(p_ref.mon), globals);
+        Monitor::arrange(Some(p_ref.mon), globals);
         p_ref.configure(globals);
         updateclientlist(globals);
     }
@@ -955,7 +955,7 @@ impl Client {
         /* unfullscreen the client */
         c_ref.setfullscreen(false, globals);
         c_ref.updatetitle(globals);
-        crate::arrange(Some(c_ref.mon), globals);
+        Monitor::arrange(Some(c_ref.mon), globals);
         unsafe {
             XMapWindow(globals.dpy.as_ptr(), c_ref.win);
             XMoveResizeWindow(
@@ -969,7 +969,7 @@ impl Client {
         }
         c_ref.setclientstate(NORMAL_STATE as i64, globals);
         Client::focus(None, globals);
-        crate::arrange(Some(c_ref.mon), globals);
+        Monitor::arrange(Some(c_ref.mon), globals);
     }
 
     pub(crate) fn sendevent(&self, proto: Atom, globals: &Globals) -> bool {
@@ -1031,14 +1031,14 @@ impl Client {
             );
         }
         Client::focus(None, globals);
-        crate::arrange(None, globals);
+        Monitor::arrange(None, globals);
     }
 
     pub(crate) fn pop(c: NonNull<Self>, globals: &mut Globals) {
         Client::detach(c);
         Client::attach(c);
         Client::focus(Some(c), globals);
-        crate::arrange(Some(unsafe { c.as_ref() }.mon), globals);
+        Monitor::arrange(Some(unsafe { c.as_ref() }.mon), globals);
     }
 
     pub(crate) fn setfocus(&self, globals: &Globals) {

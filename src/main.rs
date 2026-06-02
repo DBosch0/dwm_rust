@@ -9,12 +9,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::client::Client;
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
+use crate::monitor::Monitor;
 use crate::resource::{ResourceVal, Resources};
 
 mod client;
 mod config;
 mod drw;
 mod external_functions;
+mod monitor;
 mod resource;
 mod util;
 mod vanitygaps;
@@ -55,7 +57,6 @@ const WM_TAKE_FOCUS: usize = 3;
 const WM_LAST: usize = 4;
 
 type ArgumentFunction = fn(&Arg, &mut Globals);
-type LayoutFunction = fn(&mut Monitor, &mut Globals);
 type EventHandlerFunction = fn(&mut XEvent, &mut Globals);
 type XErrorFunction = extern "C" fn(*mut Display, *mut XErrorEvent) -> c_int;
 
@@ -99,7 +100,7 @@ struct Key {
 
 struct Layout {
     symbol: &'static str,
-    arrange: Option<LayoutFunction>,
+    arrange: Option<monitor::layouts::LayoutFunction>,
 }
 
 struct ScratchPad {
@@ -116,37 +117,6 @@ struct Rule {
     isterminal: bool,
     noswallow: bool,
     monitor: i32,
-}
-
-struct Monitor {
-    ltsymbol: [i8; 16],
-    mfact: f32,
-    nmaster: i32,
-    num: i32,
-    by: i32, //bar geometry
-    mx: i32, //screen size
-    my: i32,
-    mw: i32,
-    mh: i32,
-    wx: i32, //window area
-    wy: i32,
-    ww: i32,
-    wh: i32,
-    gappih: i32, /* horizontal gap between windows */
-    gappiv: i32, /* vertical gap between windows */
-    gappoh: i32, /* horizontal outer gaps */
-    gappov: i32, /* vertical outer gaps */
-    seltags: u32,
-    sellt: u32,
-    tagset: [u32; 2],
-    showbar: bool,
-    topbar: bool,
-    clients: Option<NonNull<Client>>,
-    sel: Option<NonNull<Client>>,
-    stack: Option<NonNull<Client>>,
-    next: Option<NonNull<Monitor>>,
-    barwin: Window,
-    lt: [&'static Layout; 2],
 }
 
 #[derive(Debug)]
@@ -238,7 +208,7 @@ fn view(arg: &Arg, globals: &mut Globals) {
             [unsafe { globals.selmon.as_ref() }.seltags as usize] = *ui & TAGMASK;
     }
     Client::focus(None, globals);
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 fn toggleview(arg: &Arg, globals: &mut Globals) {
@@ -252,7 +222,7 @@ fn toggleview(arg: &Arg, globals: &mut Globals) {
         unsafe { globals.selmon.as_mut() }.tagset
             [unsafe { globals.selmon.as_ref() }.seltags as usize] = newtagset;
         Client::focus(None, globals);
-        arrange(Some(globals.selmon), globals);
+        Monitor::arrange(Some(globals.selmon), globals);
     }
 }
 
@@ -263,7 +233,7 @@ fn tag(arg: &Arg, globals: &mut Globals) {
     {
         unsafe { sel.as_mut() }.tags = *ui & TAGMASK;
         Client::focus(None, globals);
-        arrange(Some(globals.selmon), globals);
+        Monitor::arrange(Some(globals.selmon), globals);
     }
 }
 
@@ -271,7 +241,7 @@ fn togglesticky(_arg: &Arg, globals: &mut Globals) {
     if let Some(mut sel) = unsafe { globals.selmon.as_ref() }.sel {
         let sel = unsafe { sel.as_mut() };
         sel.setsticky(!sel.issticky, globals);
-        arrange(Some(globals.selmon), globals);
+        Monitor::arrange(Some(globals.selmon), globals);
     }
 }
 
@@ -282,7 +252,7 @@ fn toggletag(arg: &Arg, globals: &mut Globals) {
         if newtags != 0 {
             unsafe { sel.as_mut() }.tags = newtags;
             Client::focus(None, globals);
-            arrange(Some(globals.selmon), globals);
+            Monitor::arrange(Some(globals.selmon), globals);
         }
     }
 }
@@ -314,11 +284,11 @@ fn togglescratch(arg: &Arg, globals: &mut Globals) {
             let seltags_idx = unsafe { globals.selmon.as_ref().seltags } as usize;
             unsafe { globals.selmon.as_mut().tagset[seltags_idx] = newtagset };
             Client::focus(None, globals);
-            arrange(Some(globals.selmon), globals);
+            Monitor::arrange(Some(globals.selmon), globals);
         }
         if unsafe { c.as_ref() }.is_visible() {
             Client::focus(Some(c), globals);
-            restack(unsafe { globals.selmon.as_ref() }, globals);
+            unsafe { globals.selmon.as_ref() }.restack(globals);
         }
     } else {
         let seltags_idx = unsafe { globals.selmon.as_ref().seltags } as usize;
@@ -474,9 +444,9 @@ fn setlayout(arg: &Arg, globals: &mut Globals) {
     };
 
     if unsafe { globals.selmon.as_ref() }.sel.is_some() {
-        arrange(Some(globals.selmon), globals);
+        Monitor::arrange(Some(globals.selmon), globals);
     } else {
-        drawbar(unsafe { globals.selmon.as_ref() }, globals);
+        unsafe { globals.selmon.as_ref() }.drawbar(globals);
     }
 }
 
@@ -485,19 +455,20 @@ fn quit(_arg: &Arg, globals: &mut Globals) {
 }
 
 fn togglebar(_arg: &Arg, globals: &mut Globals) {
-    unsafe { globals.selmon.as_mut() }.showbar = !unsafe { globals.selmon.as_ref() }.showbar;
-    updatebarpos(unsafe { globals.selmon.as_mut() }, globals);
+    let m = unsafe { globals.selmon.as_mut() };
+    m.showbar = !m.showbar;
+    m.updatebarpos(globals);
     unsafe {
         XMoveResizeWindow(
             globals.dpy.as_ptr(),
-            globals.selmon.as_ref().barwin,
-            globals.selmon.as_ref().wx,
-            globals.selmon.as_ref().by,
-            globals.selmon.as_ref().ww as u32,
+            m.barwin,
+            m.wx,
+            m.by,
+            m.ww as u32,
             globals.bh as u32,
         )
     };
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 fn togglefloating(_arg: &Arg, globals: &mut Globals) {
@@ -513,7 +484,7 @@ fn togglefloating(_arg: &Arg, globals: &mut Globals) {
     if sel.isfloating {
         sel.resize(sel.x, sel.y, sel.w, sel.h, false, globals);
     }
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 fn togglefullscreen(_arg: &Arg, globals: &mut Globals) {
@@ -542,7 +513,7 @@ fn focusstack(arg: &Arg, globals: &mut Globals) {
         c = unsafe { c_inner.as_ref() }.next;
     }
     Client::focus(if c.is_some() { c } else { p }, globals);
-    restack(unsafe { globals.selmon.as_ref() }, globals);
+    unsafe { globals.selmon.as_ref() }.restack(globals);
 }
 
 fn pushstack(arg: &Arg, globals: &mut Globals) {
@@ -583,7 +554,7 @@ fn pushstack(arg: &Arg, globals: &mut Globals) {
         unsafe { sel.as_mut() }.next = unsafe { c.as_ref() }.next;
         unsafe { c.as_mut() }.next = Some(sel);
     }
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 fn stackpos(arg: &Arg, globals: &mut Globals) -> i32 {
@@ -664,7 +635,7 @@ fn incnmaster(arg: &Arg, globals: &mut Globals) {
     };
     unsafe { globals.selmon.as_mut() }.nmaster =
         (unsafe { globals.selmon.as_ref() }.nmaster + *i).max(0);
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 #[allow(dead_code)]
@@ -690,7 +661,7 @@ fn setcfact(arg: &Arg, globals: &mut Globals) {
         return;
     }
     unsafe { c.as_mut() }.cfact = f;
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 fn setmfact(arg: &Arg, globals: &mut Globals) {
@@ -714,7 +685,7 @@ fn setmfact(arg: &Arg, globals: &mut Globals) {
         return;
     }
     unsafe { globals.selmon.as_mut() }.mfact = f;
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 fn zoom(_arg: &Arg, globals: &mut Globals) {
@@ -767,7 +738,7 @@ fn xrdb(_arg: &Arg, globals: &mut Globals) {
     }
 
     Client::focus(None, globals);
-    arrange(None, globals);
+    Monitor::arrange(None, globals);
 }
 
 fn killclient(_arg: &Arg, globals: &mut Globals) {
@@ -795,7 +766,7 @@ fn focusmon(arg: &Arg, globals: &mut Globals) {
     let Arg::I(i) = arg else {
         unreachable!("invalid argument to focus mon")
     };
-    let m = dirtomon(*i, globals);
+    let m = Monitor::dirtomon(*i, globals);
     if m == globals.selmon {
         return;
     }
@@ -817,7 +788,7 @@ fn tagmon(arg: &Arg, globals: &mut Globals) {
         unsafe { globals.selmon.as_ref() }
             .sel
             .expect("checked above to be not None"),
-        dirtomon(*i, globals),
+        Monitor::dirtomon(*i, globals),
         globals,
     );
 }
@@ -832,7 +803,7 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
         return;
     }
     let c_ref = unsafe { c.as_ref() };
-    restack(unsafe { globals.selmon.as_ref() }, globals);
+    unsafe { globals.selmon.as_ref() }.restack(globals);
     let ocx = c_ref.x;
     let ocy = c_ref.y;
     if unsafe {
@@ -935,7 +906,7 @@ fn movemouse(_arg: &Arg, globals: &mut Globals) {
         }
     }
     unsafe { XUngrabPointer(globals.dpy.as_ptr(), CURRENT_TIME) };
-    let m = recttomon(
+    let m = Monitor::recttomon(
         unsafe { c.as_ref() }.x,
         unsafe { c.as_ref() }.y,
         unsafe { c.as_ref() }.w,
@@ -959,7 +930,7 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
     if cr.isfullscreen {
         return;
     }
-    restack(unsafe { globals.selmon.as_ref() }, globals);
+    unsafe { globals.selmon.as_ref() }.restack(globals);
     let ocx = cr.x;
     let ocy = cr.y;
     if unsafe {
@@ -1066,7 +1037,7 @@ fn resizemouse(_arg: &Arg, globals: &mut Globals) {
         XUngrabPointer(globals.dpy.as_ptr(), CURRENT_TIME);
     };
     while unsafe { XCheckMaskEvent(globals.dpy.as_ptr(), ENTER_WINDOW_MASK, &mut ev) } != 0 {}
-    let m = recttomon(cr.x, cr.y, cr.w, cr.h, globals);
+    let m = Monitor::recttomon(cr.x, cr.y, cr.w, cr.h, globals);
     if m != globals.selmon {
         Client::sendmon(c, m, globals);
         globals.selmon = m;
@@ -1082,7 +1053,7 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
     let mut arg = Arg::Ui(0);
 
     /* focus monitor if necessary */
-    let m = wintomon(ev.window, globals);
+    let m = Monitor::wintomon(ev.window, globals);
     if m != globals.selmon {
         Client::unfocus(unsafe { globals.selmon.as_ref() }.sel, true, globals);
         globals.selmon = m;
@@ -1160,7 +1131,7 @@ fn buttonpress(ev: &mut XEvent, globals: &mut Globals) {
         }
     } else if let Some(c) = Client::wintoclient(ev.window, globals) {
         Client::focus(Some(c), globals);
-        restack(unsafe { globals.selmon.as_ref() }, globals);
+        unsafe { globals.selmon.as_ref() }.restack(globals);
 
         unsafe { XAllowEvents(globals.dpy.as_ptr(), REPLAY_POINTER, CURRENT_TIME) };
         click = ClickState::ClientWin;
@@ -1341,7 +1312,7 @@ fn configurenotify(ev: &mut XEvent, globals: &mut Globals) {
                 m = m_inner.next;
             }
             Client::focus(None, globals);
-            arrange(None, globals);
+            Monitor::arrange(None, globals);
         }
     }
 }
@@ -1376,7 +1347,7 @@ fn enternotify(ev: &mut XEvent, globals: &mut Globals) {
     let m = if let Some(c) = c {
         unsafe { c.as_ref() }.mon
     } else {
-        wintomon(ev.window, globals)
+        Monitor::wintomon(ev.window, globals)
     };
     if m != globals.selmon {
         Client::unfocus(unsafe { globals.selmon.as_ref() }.sel, true, globals);
@@ -1390,8 +1361,8 @@ fn enternotify(ev: &mut XEvent, globals: &mut Globals) {
 fn expose(ev: &mut XEvent, globals: &mut Globals) {
     let ev: &mut XExposeEvent = unsafe { &mut ev.xexpose };
     if ev.count == 0 {
-        let m = wintomon(ev.window, globals);
-        drawbar(unsafe { m.as_ref() }, globals);
+        let m = Monitor::wintomon(ev.window, globals);
+        unsafe { m.as_ref() }.drawbar(globals);
     }
 }
 
@@ -1447,7 +1418,7 @@ fn motionnotify(ev: &mut XEvent, globals: &mut Globals) {
     if ev.window != globals.root {
         return;
     }
-    let m = recttomon(ev.x_root, ev.y_root, 1, 1, globals);
+    let m = Monitor::recttomon(ev.x_root, ev.y_root, 1, 1, globals);
     if let Some(last) = globals.last_motion_mon
         && last != m
     {
@@ -1478,7 +1449,7 @@ fn propertynotify(ev: &mut XEvent, globals: &mut Globals) {
             {
                 cr.isfloating = Client::wintoclient(trans, globals).is_some();
                 if cr.isfloating {
-                    arrange(Some(cr.mon), globals);
+                    Monitor::arrange(Some(cr.mon), globals);
                 }
             }
 
@@ -1496,7 +1467,7 @@ fn propertynotify(ev: &mut XEvent, globals: &mut Globals) {
             if let Some(sel) = unsafe { cr.mon.as_ref() }.sel
                 && c == sel
             {
-                drawbar(unsafe { c.as_ref().mon.as_ref() }, globals);
+                unsafe { c.as_ref().mon.as_ref() }.drawbar(globals);
             }
         }
         if ev.atom == globals.netatom[NET_WM_WINDOW_TYPE] {
@@ -1575,67 +1546,6 @@ fn checkotherwm(dpy: NonNull<Display>) {
     }
 }
 
-fn createmon(globals: &Globals) -> NonNull<Monitor> {
-    let mut ltsym: [i8; 16] = [0; 16];
-    for (i, b) in config::LAYOUTS[0]
-        .symbol
-        .as_bytes()
-        .iter()
-        .take(16)
-        .enumerate()
-    {
-        ltsym[i] = *b as i8;
-    }
-
-    let m: Box<Monitor> = Box::new(Monitor {
-        ltsymbol: ltsym,
-        mfact: load_resource!("M_FACT", globals, Float),
-        nmaster: load_resource!("N_MASTER", globals, Integer) as i32,
-        num: 0,
-        by: 0,
-        mx: 0,
-        my: 0,
-        mw: 0,
-        mh: 0,
-        wx: 0,
-        wy: 0,
-        ww: 0,
-        wh: 0,
-        gappih: load_resource!("GAPP_IH", globals, Integer) as i32,
-        gappiv: load_resource!("GAPP_IV", globals, Integer) as i32,
-        gappoh: load_resource!("GAPP_OH", globals, Integer) as i32,
-        gappov: load_resource!("GAPP_OV", globals, Integer) as i32,
-        seltags: 0,
-        sellt: 0,
-        tagset: [1, 1],
-        showbar: load_resource!("SHOW_BAR", globals, Bool),
-        topbar: load_resource!("TOP_BAR", globals, Bool),
-        clients: None,
-        sel: None,
-        stack: None,
-        next: None,
-        barwin: 0,
-        lt: [
-            &config::LAYOUTS[0],
-            &config::LAYOUTS[1 % config::LAYOUTS.len()],
-        ],
-    });
-
-    NonNull::new(Box::leak(m)).expect("valid NonNull as created by Box")
-}
-
-fn updatebarpos(m: &mut Monitor, globals: &Globals) {
-    m.wy = m.my;
-    m.wh = m.mh;
-    if m.showbar {
-        m.wh -= globals.bh;
-        m.by = if m.topbar { m.wy } else { m.wy + m.wh };
-        m.wy = if m.topbar { m.wy + globals.bh } else { m.wy };
-    } else {
-        m.by = -globals.bh;
-    }
-}
-
 fn getrootptr(x: &mut i32, y: &mut i32, globals: &mut Globals) -> bool {
     let mut di: i32 = 0;
     let mut dui: u32 = 0;
@@ -1656,53 +1566,6 @@ fn getrootptr(x: &mut i32, y: &mut i32, globals: &mut Globals) -> bool {
     }) != 0
 }
 
-fn recttomon(x: i32, y: i32, w: i32, h: i32, globals: &Globals) -> NonNull<Monitor> {
-    let mut m: Option<NonNull<Monitor>>;
-    let mut r = globals.selmon;
-    let mut area = 0;
-
-    m = Some(globals.mons);
-    while let Some(m_inner) = m {
-        let m_inner_ref = unsafe { m_inner.as_ref() };
-        let a = i32::max(
-            0,
-            i32::min(x + w, m_inner_ref.wx + m_inner_ref.ww) - i32::max(x, m_inner_ref.wx),
-        ) * i32::max(
-            0,
-            i32::min(y + h, m_inner_ref.wy - m_inner_ref.wh) - i32::max(y, m_inner_ref.wy),
-        );
-
-        if a > area {
-            area = a;
-            r = m_inner;
-        }
-        m = m_inner_ref.next;
-    }
-    r
-}
-
-fn wintomon(w: Window, globals: &mut Globals) -> NonNull<Monitor> {
-    let mut x = 0;
-    let mut y = 0;
-
-    if w == globals.root && getrootptr(&mut x, &mut y, globals) {
-        return recttomon(x, y, 1, 1, globals);
-    }
-    let mut m = Some(globals.mons);
-    while let Some(m_inner) = m {
-        if w == unsafe { m_inner.as_ref() }.barwin {
-            return m_inner;
-        }
-        m = unsafe { m_inner.as_ref() }.next;
-    }
-
-    let c = Client::wintoclient(w, globals);
-    if let Some(c) = c {
-        return unsafe { c.as_ref() }.mon;
-    }
-    globals.selmon
-}
-
 fn updategeom(globals: &mut Globals) -> bool {
     let mut dirty = false;
 
@@ -1711,7 +1574,7 @@ fn updategeom(globals: &mut Globals) -> bool {
 
     // We are in initialization
     if !globals.running {
-        globals.mons = createmon(globals);
+        globals.mons = Monitor::createmon(globals);
     }
 
     let mons_ref = unsafe { globals.mons.as_mut() };
@@ -1721,11 +1584,11 @@ fn updategeom(globals: &mut Globals) -> bool {
         mons_ref.mw = mons_ref.ww;
         mons_ref.wh = globals.sh;
         mons_ref.mh = mons_ref.wh;
-        updatebarpos(mons_ref, globals);
+        mons_ref.updatebarpos(globals);
     }
     if dirty {
         globals.selmon = globals.mons;
-        globals.selmon = wintomon(globals.root, globals);
+        globals.selmon = Monitor::wintomon(globals.root, globals);
     }
 
     dirty
@@ -1817,167 +1680,12 @@ fn gettextprop(w: Window, atom: Atom, text: *mut i8, size: u32, globals: &Global
     true
 }
 
-fn drawbar(m: &Monitor, globals: &mut Globals) {
-    let mut tw = 0i32;
-    let font_h = unsafe {
-        globals
-            .drw
-            .fonts
-            .expect("checked at init that at least 1 font exists")
-            .as_ref()
-            .h
-    };
-    let boxs = font_h / 9;
-    let boxw = font_h / 6 + 2;
-    let mut occ = 0u32;
-    let mut urg = 0u32;
-
-    if !m.showbar {
-        return;
-    }
-
-    let is_selmon = core::ptr::eq(m, globals.selmon.as_ptr());
-    if is_selmon {
-        globals
-            .drw
-            .setscheme(Rc::clone(&globals.scheme[SCHEME_STATE_NORM]));
-
-        let mut text = globals.stext.as_mut_ptr();
-        let mut s = globals.stext.as_mut_ptr();
-        let mut x = 0;
-        while unsafe { *s } != 0 {
-            // for (text = s = stext; *s; s++) {
-            if (unsafe { *s } as u8) < b' ' {
-                let ch = unsafe { *s };
-                unsafe { *s = b'\0' as i8 };
-                tw = text_w(text, globals) - globals.lrpad;
-                globals.drw.text(
-                    m.ww - globals.statusw + x,
-                    0,
-                    tw as u32,
-                    globals.bh as u32,
-                    0,
-                    text,
-                    false,
-                );
-                x += tw;
-                unsafe { *s = ch };
-                text = unsafe { s.add(1) };
-            }
-            s = unsafe { s.add(1) };
-        }
-        tw = text_w(text, globals) - globals.lrpad + 2;
-        globals.drw.text(
-            m.ww - globals.statusw + x,
-            0,
-            tw as u32,
-            globals.bh as u32,
-            0,
-            text,
-            false,
-        );
-        tw = globals.statusw;
-    }
-    let mut c = m.clients;
-    while let Some(c_inner) = c {
-        let c_ref = unsafe { c_inner.as_ref() };
-        occ |= if c_ref.tags == TAGMASK { 0 } else { c_ref.tags };
-        if c_ref.isurgent {
-            urg |= c_ref.tags;
-        }
-        c = c_ref.next
-    }
-    let mut x = 0;
-    for i in 0..config::TAGS.len() {
-        // Do not draw vacant tags
-        if !(occ & 1 << i != 0 || m.tagset[m.seltags as usize] & 1 << i != 0) {
-            continue;
-        }
-
-        let tag = CString::new(config::TAGS[i]).expect("valid c string");
-        let w = globals.drw.fontset_getwidth(tag.as_ptr()) + globals.lrpad as u32;
-        globals.drw.setscheme(Rc::clone(
-            &globals.scheme[if (m.tagset[m.seltags as usize] & 1 << i) != 0 {
-                SCHEME_STATE_SEL
-            } else {
-                SCHEME_STATE_NORM
-            }],
-        ));
-        globals.drw.text(
-            x,
-            0,
-            w,
-            globals.bh as u32,
-            globals.lrpad as u32 / 2,
-            tag.as_ptr(),
-            urg & 1 << i != 0,
-        );
-        x += w as i32;
-    }
-
-    let w = globals.drw.fontset_getwidth(&m.ltsymbol as *const i8) + globals.lrpad as u32;
-    globals
-        .drw
-        .setscheme(Rc::clone(&globals.scheme[SCHEME_STATE_NORM]));
-    let x = globals.drw.text(
-        x,
-        0,
-        w,
-        globals.bh as u32,
-        globals.lrpad as u32 / 2,
-        &m.ltsymbol as *const i8,
-        false,
-    );
-
-    let w = m.ww - tw - x;
-    if w > globals.bh {
-        if let Some(m_sel) = m.sel {
-            let m_sel_ref = unsafe { m_sel.as_ref() };
-            globals.drw.setscheme(Rc::clone(
-                &globals.scheme[if is_selmon {
-                    SCHEME_STATE_SEL
-                } else {
-                    SCHEME_STATE_NORM
-                }],
-            ));
-            globals.drw.text(
-                x,
-                0,
-                w as u32,
-                globals.bh as u32,
-                globals.lrpad as u32 / 2,
-                &m_sel_ref.name as *const i8,
-                false,
-            );
-            if m_sel_ref.isfloating {
-                globals.drw.rect(
-                    x + boxs as i32,
-                    boxs as i32,
-                    boxw,
-                    boxw,
-                    m_sel_ref.isfixed,
-                    false,
-                );
-            }
-        } else {
-            globals
-                .drw
-                .setscheme(Rc::clone(&globals.scheme[SCHEME_STATE_NORM]));
-            globals
-                .drw
-                .rect(x, 0, w as u32, globals.bh as u32, true, true);
-        }
-    }
-    globals
-        .drw
-        .map(m.barwin, 0, 0, m.ww as u32, globals.bh as u32)
-}
-
 fn drawbars(globals: &mut Globals) {
     let mut m = Some(globals.mons);
     while let Some(m_inner) = m {
-        drawbar(unsafe { m_inner.as_ref() }, globals);
-        m = unsafe { m_inner.as_ref() }.next;
+        let mr = unsafe { m_inner.as_ref() };
+        mr.drawbar(globals);
+        m = mr.next;
     }
 }
 
@@ -2072,7 +1780,7 @@ fn updatestatus(globals: &mut Globals) {
         globals.statusw += text_w(text, globals) - globals.lrpad + 2;
     }
 
-    drawbar(unsafe { globals.selmon.as_ref() }, globals);
+    unsafe { globals.selmon.as_ref() }.drawbar(globals);
 }
 
 fn updatenumlockmask(globals: &mut Globals) {
@@ -2154,35 +1862,6 @@ fn grabkeys(globals: &mut Globals) {
     }
 }
 
-// dirtomon always returns a valid monitor. Callers must guard with
-// `if mons.next.is_none() { return; }` before calling to ensure ≥2 monitors exist.
-// In all three branches we either wrap around to `mons` (non-null by invariant) or
-// walk a linked list that is guaranteed to contain `selmon`.
-fn dirtomon(dir: i32, globals: &Globals) -> NonNull<Monitor> {
-    if dir > 0 {
-        // Next monitor, wrapping around to the first if selmon is the last.
-        unsafe { globals.selmon.as_ref() }
-            .next
-            .unwrap_or(globals.mons)
-    } else if globals.selmon == globals.mons {
-        // Walk to the last monitor in the list.
-        let mut m = globals.mons;
-        while let Some(next) = unsafe { m.as_ref() }.next {
-            m = next;
-        }
-        m
-    } else {
-        // Walk to the predecessor of selmon.
-        let mut m = globals.mons;
-        while unsafe { m.as_ref() }.next != Some(globals.selmon) {
-            m = unsafe { m.as_ref() }
-                .next
-                .expect("selmon is always reachable from mons");
-        }
-        m
-    }
-}
-
 fn getstate(w: Window, globals: &Globals) -> i64 {
     let mut format: i32 = 0;
     let mut result = -1i64;
@@ -2216,83 +1895,6 @@ fn getstate(w: Window, globals: &Globals) -> i64 {
     unsafe { XFree(p.cast()) };
 
     result
-}
-
-fn restack(m: &Monitor, globals: &mut Globals) {
-    const BELOW: i32 = 1;
-    let mut wc: XWindowChanges = XWindowChanges {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-        border_width: 0,
-        sibling: 0,
-        stack_mode: 0,
-    };
-
-    let mut ev: XEvent = unsafe { core::mem::zeroed() };
-
-    drawbar(m, globals);
-    if m.sel.is_none() {
-        return;
-    }
-    if let Some(sel) = m.sel
-        && (unsafe { sel.as_ref() }.isfloating || m.lt[m.sellt as usize].arrange.is_none())
-    {
-        unsafe { XRaiseWindow(globals.dpy.as_ptr(), sel.as_ref().win) };
-    }
-    if m.lt[m.sellt as usize].arrange.is_some() {
-        wc.stack_mode = BELOW;
-        wc.sibling = m.barwin;
-        let mut c = m.stack;
-        while let Some(c_inner) = c {
-            if !unsafe { c_inner.as_ref() }.isfloating && unsafe { c_inner.as_ref() }.is_visible() {
-                unsafe {
-                    XConfigureWindow(
-                        globals.dpy.as_ptr(),
-                        c_inner.as_ref().win,
-                        CW_SIBLING | CW_STACK_MODE,
-                        &mut wc,
-                    )
-                };
-                wc.sibling = unsafe { c_inner.as_ref().win };
-            }
-            c = unsafe { c_inner.as_ref() }.snext;
-        }
-    }
-    unsafe { XSync(globals.dpy.as_ptr(), 0) };
-    while unsafe { XCheckMaskEvent(globals.dpy.as_ptr(), ENTER_WINDOW_MASK, &mut ev) } != 0 {}
-}
-
-fn arrange(mut m: Option<NonNull<Monitor>>, globals: &mut Globals) {
-    if let Some(m) = m {
-        Client::showhide(unsafe { m.as_ref().stack }, globals);
-    } else {
-        m = Some(globals.mons);
-        while let Some(m_inner) = m {
-            Client::showhide(unsafe { m_inner.as_ref() }.stack, globals);
-            m = unsafe { m_inner.as_ref() }.next;
-        }
-    }
-
-    if let Some(mut m) = m {
-        arrangemon(unsafe { m.as_mut() }, globals);
-        restack(unsafe { m.as_ref() }, globals);
-    } else {
-        m = Some(globals.mons);
-        while let Some(mut m_inner) = m {
-            arrangemon(unsafe { m_inner.as_mut() }, globals);
-            m = unsafe { m_inner.as_ref() }.next;
-        }
-    }
-}
-
-fn arrangemon(m: &mut Monitor, globals: &mut Globals) {
-    let symbol = CString::new(m.lt[m.sellt as usize].symbol).expect("valid CString");
-    unsafe { libc::strncpy(m.ltsymbol.as_mut_ptr(), symbol.as_ptr(), m.ltsymbol.len()) };
-    if let Some(f) = m.lt[m.sellt as usize].arrange {
-        f(m, globals)
-    }
 }
 
 #[allow(dead_code)]
@@ -2412,7 +2014,7 @@ fn swaptags(arg: &Arg, globals: &mut Globals) {
     //     [unsafe { globals.selmon.as_ref() }.seltags as usize] = newtag;
 
     Client::focus(None, globals);
-    arrange(Some(globals.selmon), globals);
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 #[allow(dead_code)]
@@ -2560,7 +2162,7 @@ fn manage(w: Window, wa: &XWindowAttributes, globals: &mut Globals) {
         Client::unfocus(unsafe { globals.selmon.as_ref() }.sel, false, globals);
     }
     unsafe { c.as_mut().mon.as_mut() }.sel = Some(c);
-    arrange(Some(unsafe { c.as_ref() }.mon), globals);
+    Monitor::arrange(Some(unsafe { c.as_ref() }.mon), globals);
     unsafe { XMapWindow(globals.dpy.as_ptr(), c.as_ref().win) };
 
     if let Some(term) = term {
@@ -2890,7 +2492,7 @@ fn cleanup(mut globals: Globals) -> *mut Display {
     //cleanup monitors
     unsafe { XUngrabKey(globals.dpy.as_ptr(), ANY_KEY, ANY_MODIFIER, globals.root) };
     globals.selmon = NonNull::dangling(); // prevent use-after-free: monitors are freed next
-    while !cleanupmon(globals.mons, &mut globals) {}
+    while !Monitor::cleanupmon(globals.mons, &mut globals) {}
 
     let Globals {
         cursor,
@@ -2923,35 +2525,6 @@ fn cleanup(mut globals: Globals) -> *mut Display {
     };
     unsafe { XDeleteProperty(dpy.as_ptr(), root, netatom[NET_ACTIVE_WINDOW]) };
     dpy.as_ptr()
-}
-
-fn cleanupmon(mon: NonNull<Monitor>, globals: &mut Globals) -> bool {
-    let mut done = false;
-    if mon == globals.mons {
-        globals.mons = match unsafe { globals.mons.as_ref() }.next {
-            Some(m) => m,
-            None => {
-                done = true;
-                NonNull::dangling()
-            }
-        };
-    } else {
-        let mut m = Some(globals.mons);
-        while let Some(m_inner) = m
-            && let Some(next) = unsafe { m_inner.as_ref() }.next
-            && next != mon
-        {
-            m = unsafe { m_inner.as_ref() }.next;
-        }
-        unsafe { m.expect("should be a valid reference").as_mut() }.next =
-            unsafe { mon.as_ref() }.next;
-    }
-    unsafe { XUnmapWindow(globals.dpy.as_ptr(), mon.as_ref().barwin) };
-    unsafe { XDestroyWindow(globals.dpy.as_ptr(), mon.as_ref().barwin) };
-    unsafe {
-        let _ = Box::from_raw(mon.as_ptr());
-    }
-    done
 }
 
 fn main() {

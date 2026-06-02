@@ -118,55 +118,55 @@ pub const FORCE_VSPLIT: bool = true; /* nrowgrid layout: force two clients to al
 pub const LAYOUTS: &[Layout] = &[
     Layout {
         symbol: "[]=",
-        arrange: Some(crate::vanitygaps::tile),
+        arrange: Some(crate::monitor::layouts::tile),
     },
     Layout {
         symbol: "[M]",
-        arrange: Some(crate::vanitygaps::monocle),
+        arrange: Some(crate::monitor::layouts::monocle),
     },
     Layout {
         symbol: "[@]",
-        arrange: Some(crate::vanitygaps::spiral),
+        arrange: Some(crate::monitor::layouts::spiral),
     },
     Layout {
         symbol: "[\\]",
-        arrange: Some(crate::vanitygaps::dwindle),
+        arrange: Some(crate::monitor::layouts::dwindle),
     },
     Layout {
         symbol: "H[]",
-        arrange: Some(crate::vanitygaps::deck),
+        arrange: Some(crate::monitor::layouts::deck),
     },
     Layout {
         symbol: "TTT",
-        arrange: Some(crate::vanitygaps::bstack),
+        arrange: Some(crate::monitor::layouts::bstack),
     },
     Layout {
         symbol: "===",
-        arrange: Some(crate::vanitygaps::bstackhoriz),
+        arrange: Some(crate::monitor::layouts::bstackhoriz),
     },
     Layout {
         symbol: "HHH",
-        arrange: Some(crate::vanitygaps::grid),
+        arrange: Some(crate::monitor::layouts::grid),
     },
     Layout {
         symbol: "###",
-        arrange: Some(crate::vanitygaps::nrowgrid),
+        arrange: Some(crate::monitor::layouts::nrowgrid),
     },
     Layout {
         symbol: "---",
-        arrange: Some(crate::vanitygaps::horizgrid),
+        arrange: Some(crate::monitor::layouts::horizgrid),
     },
     Layout {
         symbol: ":::",
-        arrange: Some(crate::vanitygaps::gaplessgrid),
+        arrange: Some(crate::monitor::layouts::gaplessgrid),
     },
     Layout {
         symbol: "|M|",
-        arrange: Some(crate::vanitygaps::centeredmaster),
+        arrange: Some(crate::monitor::layouts::centeredmaster),
     },
     Layout {
         symbol: ">M>",
-        arrange: Some(crate::vanitygaps::centeredfloatingmaster),
+        arrange: Some(crate::monitor::layouts::centeredfloatingmaster),
     },
     Layout {
         symbol: "><>",
