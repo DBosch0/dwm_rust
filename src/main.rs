@@ -23,6 +23,7 @@ const BUTTON_MASK: i64 = BUTTON_PRESS_MASK | BUTTON_RELEASE_MASK;
 const SPTAGMASK: u32 = ((1 << config::SCRATCHPADS.len()) as u32 - 1) << config::TAGS.len() as u32;
 const MOUSE_MASK: i64 = BUTTON_MASK | POINTER_MOTION_MASK;
 const PREV_SEL: i32 = 3000;
+const BROKEN: &CStr = c"broken";
 
 enum CursorState {
     Normal = 0,
@@ -284,7 +285,6 @@ type HandlerFunction = fn(&mut XEvent, &mut Globals);
 // read only in xerror thereafter.
 // TODO: move into globals?
 static XERRORXLIB: AtomicUsize = AtomicUsize::new(0);
-const BROKEN: &CStr = c"broken";
 // Indexed by X11 event type (0..LAST_EVENT). X11 event types start at 2;
 // indices 0 and 1 are unused. This matches the C designated-initializer table:
 //   static void (*handler[LASTEvent])(XEvent *) = { [ButtonPress]=buttonpress, ... }
@@ -354,6 +354,7 @@ struct Globals {
     statusw: i32,
     statussig: i32,
     statuspid: libc::pid_t,
+    enable_gaps: bool,
 }
 
 fn nexttiled(mut c: Option<NonNull<Client>>) -> Option<NonNull<Client>> {
@@ -2376,6 +2377,7 @@ fn getstatusbarpid(globals: &mut Globals) -> libc::pid_t {
     }
 }
 
+#[allow(dead_code)]
 fn sigstatusbar(arg: &Arg, globals: &mut Globals) {
     let mut sv: libc::sigval = unsafe { core::mem::zeroed() };
 
@@ -4010,6 +4012,7 @@ fn setup(dpy: NonNull<Display>, resources: Resources, xcon: NonNull<xcb_connecti
         statusw: 0,
         statussig: 0,
         statuspid: -1 as libc::pid_t,
+        enable_gaps: true,
     };
 
     updategeom(&mut globals);

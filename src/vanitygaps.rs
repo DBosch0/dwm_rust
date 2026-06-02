@@ -1,11 +1,6 @@
 use crate::{Arg, Globals, Monitor};
 // arrange, load_resource_bool, nexttiled, resize};
-use std::{
-    ffi::CString,
-    sync::atomic::{AtomicBool, Ordering},
-};
-
-pub(crate) static ENABLE_GAPS: AtomicBool = AtomicBool::new(true);
+use std::ffi::CString;
 
 #[allow(dead_code)]
 pub(crate) fn setgaps(mut oh: i32, mut ov: i32, mut ih: i32, mut iv: i32, globals: &mut Globals) {
@@ -31,8 +26,7 @@ pub(crate) fn setgaps(mut oh: i32, mut ov: i32, mut ih: i32, mut iv: i32, global
 
 #[allow(dead_code)]
 pub(crate) fn togglegaps(_arg: &Arg, globals: &mut Globals) {
-    let eg = ENABLE_GAPS.load(Ordering::Relaxed);
-    ENABLE_GAPS.store(!eg, Ordering::Relaxed);
+    globals.enable_gaps = !globals.enable_gaps;
     crate::arrange(None, globals);
 }
 
@@ -132,7 +126,7 @@ pub(crate) fn incrivgaps(arg: &Arg, globals: &mut Globals) {
 }
 
 pub(crate) fn getgaps(m: &Monitor, globals: &mut Globals) -> (i32, i32, i32, i32, u32) {
-    let ie = ENABLE_GAPS.load(Ordering::Relaxed) as i32;
+    let ie = globals.enable_gaps as i32;
     let mut oe = ie;
     let mut n = 0;
     let mut c = crate::nexttiled(m.clients);
