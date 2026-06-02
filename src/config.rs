@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 use crate::{
-    Button, ClickState, Key, Layout, ResourceConfig, ResourceValConfig, Rule, ScratchPad,
+    Button, ClickState, Key, Layout, Rule, ScratchPad,
     external_functions::{
         BUTTON1, BUTTON2, BUTTON3, CONTROL_MASK, MOD1_MASK, SHIFT_MASK, keycodes::*,
     },
+    resource::{ResourceConfig, ResourceValConfig},
     sptag,
 };
 
@@ -121,7 +122,7 @@ pub const LAYOUTS: &[Layout] = &[
     },
     Layout {
         symbol: "[M]",
-        arrange: Some(crate::monocle),
+        arrange: Some(crate::vanitygaps::monocle),
     },
     Layout {
         symbol: "[@]",
