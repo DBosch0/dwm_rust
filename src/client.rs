@@ -1,10 +1,10 @@
 use std::{ffi::CString, mem::MaybeUninit, ptr::NonNull};
 
+use crate::event::ClickState;
 use crate::{
-    BROKEN, ClickState, Globals, Monitor, NET_ACTIVE_WINDOW, NET_WM_FULLSCREEN, NET_WM_NAME,
-    NET_WM_STATE, NET_WM_STICKY, NET_WM_WINDOW_TYPE, NET_WM_WINDOW_TYPE_DIALOG, SCHEME_STATE_NORM,
+    BROKEN, Globals, Monitor, NET_ACTIVE_WINDOW, NET_WM_FULLSCREEN, NET_WM_NAME, NET_WM_STATE,
+    NET_WM_STICKY, NET_WM_WINDOW_TYPE, NET_WM_WINDOW_TYPE_DIALOG, SCHEME_STATE_NORM,
     SCHEME_STATE_SEL, SPTAGMASK, TAGMASK, WM_PROTOCOLS, WM_STATE, WM_TAKE_FOCUS, load_resource,
-    updateclientlist, updatenumlockmask,
 };
 
 use crate::external_functions::{
@@ -98,7 +98,7 @@ impl Client {
                 if unsafe { ci.as_ref().isterminal }
                     && unsafe { ci.as_ref().swallowing.is_none() }
                     && unsafe { ci.as_ref().pid } != 0
-                    && crate::isdescprocess(unsafe { ci.as_ref().pid }, self.pid) != 0
+                    && crate::util::isdescprocess(unsafe { ci.as_ref().pid }, self.pid) != 0
                 {
                     return c;
                 }
@@ -515,7 +515,7 @@ impl Client {
     }
 
     pub(crate) fn grabbuttons(&self, focused: bool, globals: &mut Globals) {
-        updatenumlockmask(globals);
+        globals.updatenumlockmask();
         {
             let modifiers = [
                 0,
@@ -565,19 +565,17 @@ impl Client {
     }
 
     pub(crate) fn updatetitle(&mut self, globals: &Globals) {
-        if !crate::gettextprop(
+        if !globals.gettextprop(
             self.win,
             globals.netatom[NET_WM_NAME],
             self.name.as_mut_ptr(),
             self.name.len() as u32,
-            globals,
         ) {
-            crate::gettextprop(
+            globals.gettextprop(
                 self.win,
                 XA_WM_NAME,
                 self.name.as_mut_ptr(),
                 self.name.len() as u32,
-                globals,
             );
         }
         if self.name[0] == b'\0' as i8 {
@@ -739,7 +737,7 @@ impl Client {
         //but if s is some we will have returned already above. So not possible for
         //s to not be none in this case.
         Client::focus(None, globals);
-        updateclientlist(globals);
+        globals.updateclientlist();
         Monitor::arrange(Some(m), globals);
     }
 
@@ -874,7 +872,7 @@ impl Client {
             };
         }
         unsafe { globals.selmon.as_mut().sel = c };
-        crate::drawbars(globals);
+        globals.drawbars();
     }
 
     pub(crate) fn seturgent(&mut self, urg: bool, globals: &Globals) {
@@ -940,7 +938,7 @@ impl Client {
         };
         Monitor::arrange(Some(p_ref.mon), globals);
         p_ref.configure(globals);
-        updateclientlist(globals);
+        globals.updateclientlist();
     }
 
     pub(crate) fn unswallow(mut c: NonNull<Self>, globals: &mut Globals) {

@@ -1,12 +1,13 @@
 #![allow(dead_code)]
 use crate::{
-    ClickState, Layout, Rule, ScratchPad,
+    Layout, Rule, ScratchPad,
     argument::{Arg, Button, Key},
+    event::ClickState,
     external_functions::{
         BUTTON1, BUTTON2, BUTTON3, CONTROL_MASK, MOD1_MASK, SHIFT_MASK, keycodes::*,
     },
     resource::{ResourceConfig, ResourceValConfig},
-    sptag,
+    util::sptag,
 };
 
 pub const TERMINAL: &str = "st";

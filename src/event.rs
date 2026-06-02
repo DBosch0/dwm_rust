@@ -1,10 +1,9 @@
 use std::ffi::CString;
 
 use crate::{
-    ClickState, Globals, NET_ACTIVE_WINDOW, NET_WM_FULLSCREEN, NET_WM_NAME, NET_WM_STATE,
-    NET_WM_STICKY, NET_WM_WINDOW_TYPE, SPTAGMASK, TAGMASK,
+    Globals, NET_ACTIVE_WINDOW, NET_WM_FULLSCREEN, NET_WM_NAME, NET_WM_STATE, NET_WM_STICKY,
+    NET_WM_WINDOW_TYPE, SPTAGMASK, TAGMASK,
     argument::Arg,
-    cleanmask,
     client::Client,
     external_functions::{
         BUTTON_PRESS, CLIENT_MESSAGE, CONFIGURE_NOTIFY, CONFIGURE_REQUEST, CURRENT_TIME,
@@ -19,7 +18,6 @@ use crate::{
         XUnmapEvent, XWindowAttributes, XWindowChanges,
     },
     monitor::Monitor,
-    text_w, updatebars, updategeom,
 };
 
 pub(crate) type EventHandlerFunction = fn(&mut XEvent, &mut Globals);
@@ -42,6 +40,16 @@ pub(crate) const fn event_handler(event_type: i32) -> Option<EventHandlerFunctio
         MAPPING_NOTIFY => Some(XEvent::mappingnotify),
         _ => None,
     }
+}
+
+#[derive(PartialEq, Eq)]
+pub(crate) enum ClickState {
+    TagBar,
+    LtSymbol,
+    StatusText,
+    WinTitle,
+    ClientWin,
+    RootWin,
 }
 
 impl XEvent {
@@ -79,7 +87,7 @@ impl XEvent {
                         != 0
                 {
                     let ctag = CString::new(crate::config::TAGS[i]).expect("valid CStr");
-                    x += text_w(ctag.as_ptr(), globals);
+                    x += globals.text_w(ctag.as_ptr());
                     if ev.x < x {
                         break; // clicked on tag i
                     }
@@ -94,10 +102,7 @@ impl XEvent {
                 click = ClickState::TagBar;
                 arg = Arg::Ui(1 << i)
             } else if ev.x
-                < x + text_w(
-                    unsafe { globals.selmon.as_ref() }.ltsymbol.as_ptr(),
-                    globals,
-                )
+                < x + globals.text_w(unsafe { globals.selmon.as_ref() }.ltsymbol.as_ptr())
             {
                 click = ClickState::LtSymbol
             } else if ev.x > unsafe { globals.selmon.as_ref() }.ww - globals.statusw {
@@ -111,7 +116,7 @@ impl XEvent {
                     if ((unsafe { *s }) as u8) < b' ' {
                         let ch = unsafe { *s };
                         unsafe { *s = b'\0' as i8 };
-                        x += text_w(text, globals) - globals.lrpad;
+                        x += globals.text_w(text) - globals.lrpad;
                         unsafe { *s = ch };
                         text = unsafe { s.add(1) };
                         if x >= ev.x {
@@ -141,8 +146,7 @@ impl XEvent {
             if click == crate::config::BUTTONS[i].click
                 && let Some(f) = crate::config::BUTTONS[i].func
                 && crate::config::BUTTONS[i].button == ev.button
-                && cleanmask(crate::config::BUTTONS[i].mask, globals)
-                    == cleanmask(ev.state, globals)
+                && globals.cleanmask(crate::config::BUTTONS[i].mask) == globals.cleanmask(ev.state)
             {
                 f(
                     if click == ClickState::TagBar
@@ -287,9 +291,9 @@ impl XEvent {
             let dirty = globals.sw != ev.width || globals.sh != ev.height;
             globals.sw = ev.width;
             globals.sh = ev.height;
-            if updategeom(globals) || dirty {
+            if globals.updategeom() || dirty {
                 globals.drw.resize(globals.sw as u32, globals.bh as u32);
-                updatebars(globals);
+                globals.updatebars();
                 let mut m = Some(globals.mons);
                 while let Some(m_inner) = m {
                     let m_inner = unsafe { m_inner.as_ref() };
@@ -384,7 +388,7 @@ impl XEvent {
         let keysym = unsafe { XKeycodeToKeysym(globals.dpy.as_ptr(), ev.keycode as KeyCode, 0) };
         for key in crate::config::KEYS.iter() {
             if keysym == key.keysym
-                && cleanmask(key.r#mod, globals) == cleanmask(ev.state, globals)
+                && globals.cleanmask(key.r#mod) == globals.cleanmask(ev.state)
                 && let Some(f) = key.func
             {
                 f(&key.arg, globals);
@@ -398,7 +402,7 @@ impl XEvent {
         let ev: &mut XMappingEvent = unsafe { &mut self.xmapping };
         unsafe { XRefreshKeyboardMapping(ev) };
         if ev.request == MAPPING_KEYBOARD {
-            crate::grabkeys(globals);
+            globals.grabkeys();
         }
     }
 
@@ -412,7 +416,7 @@ impl XEvent {
             return;
         }
         if Client::wintoclient(ev.window, globals).is_none() {
-            crate::manage(ev.window, &wa, globals);
+            globals.manage(ev.window, &wa);
         }
     }
 
@@ -440,7 +444,7 @@ impl XEvent {
         let mut trans: Window = 0;
 
         if ev.window == globals.root && ev.atom == XA_WM_NAME {
-            crate::updatestatus(globals);
+            globals.updatestatus();
         } else if ev.state == PROPERTY_DELETE {
         } else if let Some(mut c) = Client::wintoclient(ev.window, globals) {
             let cr = unsafe { c.as_mut() };
@@ -462,7 +466,7 @@ impl XEvent {
                 }
                 XA_WM_HINTS => {
                     cr.updatewmhints(globals);
-                    crate::drawbars(globals);
+                    globals.drawbars();
                 }
                 _ => {}
             }

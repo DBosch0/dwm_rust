@@ -1,13 +1,14 @@
 use std::{ffi::CString, ptr::NonNull, rc::Rc};
 
 use crate::{
-    Globals, Layout, SCHEME_STATE_NORM, SCHEME_STATE_SEL, TAGMASK,
+    Globals, SCHEME_STATE_NORM, SCHEME_STATE_SEL, TAGMASK,
     client::Client,
     external_functions::{
         CW_SIBLING, CW_STACK_MODE, ENTER_WINDOW_MASK, Window, XCheckMaskEvent, XConfigureWindow,
         XDestroyWindow, XEvent, XRaiseWindow, XSync, XUnmapWindow, XWindowChanges,
     },
     load_resource,
+    monitor::layouts::Layout,
 };
 
 pub(crate) struct Monitor {
@@ -140,7 +141,7 @@ impl Monitor {
         let mut x = 0;
         let mut y = 0;
 
-        if w == globals.root && crate::getrootptr(&mut x, &mut y, globals) {
+        if w == globals.root && globals.getrootptr(&mut x, &mut y) {
             return Monitor::recttomon(x, y, 1, 1, globals);
         }
         let mut m = Some(globals.mons);
@@ -191,7 +192,7 @@ impl Monitor {
                 if (unsafe { *s } as u8) < b' ' {
                     let ch = unsafe { *s };
                     unsafe { *s = b'\0' as i8 };
-                    tw = crate::text_w(text, globals) - globals.lrpad;
+                    tw = globals.text_w(text) - globals.lrpad;
                     globals.drw.text(
                         self.ww - globals.statusw + x,
                         0,
@@ -207,7 +208,7 @@ impl Monitor {
                 }
                 s = unsafe { s.add(1) };
             }
-            tw = crate::text_w(text, globals) - globals.lrpad + 2;
+            tw = globals.text_w(text) - globals.lrpad + 2;
             globals.drw.text(
                 self.ww - globals.statusw + x,
                 0,
@@ -523,6 +524,11 @@ pub(crate) mod layouts {
     use crate::{Globals, client::Client, monitor::Monitor};
 
     pub(crate) type LayoutFunction = fn(&mut super::Monitor, &mut super::Globals);
+
+    pub(crate) struct Layout {
+        pub(crate) symbol: &'static str,
+        pub(crate) arrange: Option<LayoutFunction>,
+    }
 
     pub(crate) fn bstack(m: &mut Monitor, globals: &mut Globals) {
         let (oh, ov, ih, iv, n) = m.getgaps(globals);

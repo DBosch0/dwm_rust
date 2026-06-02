@@ -1,10 +1,11 @@
 use std::ffi::{CString, c_void};
 
 use crate::{
-    CURSOR_STATE_MOVE, CURSOR_STATE_RESIZE, ClickState, Globals, Layout, MOUSE_MASK, PREV_SEL,
-    TAGMASK, WM_DELETE,
+    CURSOR_STATE_MOVE, CURSOR_STATE_RESIZE, Globals, Layout, MOUSE_MASK, PREV_SEL, TAGMASK,
+    WM_DELETE,
     client::Client,
     die,
+    event::ClickState,
     external_functions::{
         BUTTON_RELEASE, CONFIGURE_REQUEST, CURRENT_TIME, ENTER_WINDOW_MASK, EXPOSE, EXPOSURE_MASK,
         GRAB_MODE_ASYNC, KeySym, MAP_REQUEST, MOTION_NOTIFY, SUBSTRUCTURE_REDIRECT_MASK, Time,
@@ -12,10 +13,10 @@ use crate::{
         XMoveResizeWindow, XSetCloseDownMode, XSetErrorHandler, XSync, XUngrabPointer,
         XUngrabServer, XWarpPointer, connection_number,
     },
-    getrootptr, getstatusbarpid, load_resource,
+    load_resource,
     monitor::Monitor,
     resource::ResourceVal,
-    shift, sptag,
+    util::{shift, sptag},
 };
 
 pub(crate) enum Arg {
@@ -612,7 +613,7 @@ impl Arg {
         let mut x = 0;
         let mut y = 0;
         let mut lasttime: Time = 0;
-        if !getrootptr(&mut x, &mut y, globals) {
+        if !globals.getrootptr(&mut x, &mut y) {
             return;
         }
         let mut ev: XEvent = unsafe { core::mem::zeroed() };
@@ -852,7 +853,7 @@ impl Arg {
             unreachable!("invalid argument to sigstatusbar")
         };
         sv.sival_ptr = (*i) as *mut c_void;
-        let statuspid = getstatusbarpid(globals);
+        let statuspid = globals.getstatusbarpid();
         if statuspid <= 0 {
             return;
         }
@@ -1000,12 +1001,11 @@ impl Arg {
 
     #[allow(dead_code)]
     pub(crate) fn defaultgaps(&self, globals: &mut Globals) {
-        crate::setgaps(
+        globals.setgaps(
             crate::load_resource!("GAPP_OH", globals, Integer) as i32,
             crate::load_resource!("GAPP_OV", globals, Integer) as i32,
             crate::load_resource!("GAPP_IH", globals, Integer) as i32,
             crate::load_resource!("GAPP_IV", globals, Integer) as i32,
-            globals,
         );
     }
 
@@ -1014,12 +1014,11 @@ impl Arg {
         let Arg::I(i) = self else {
             unreachable!("invalid value given to incrgaps")
         };
-        crate::setgaps(
+        globals.setgaps(
             unsafe { globals.selmon.as_ref() }.gappoh + *i,
             unsafe { globals.selmon.as_ref() }.gappov + *i,
             unsafe { globals.selmon.as_ref() }.gappih + *i,
             unsafe { globals.selmon.as_ref() }.gappiv + *i,
-            globals,
         );
     }
 
@@ -1028,12 +1027,11 @@ impl Arg {
         let Arg::I(i) = self else {
             unreachable!("invalid value given to incrgaps")
         };
-        crate::setgaps(
+        globals.setgaps(
             unsafe { globals.selmon.as_ref() }.gappoh,
             unsafe { globals.selmon.as_ref() }.gappov,
             unsafe { globals.selmon.as_ref() }.gappih + *i,
             unsafe { globals.selmon.as_ref() }.gappiv + *i,
-            globals,
         );
     }
 
@@ -1042,12 +1040,11 @@ impl Arg {
         let Arg::I(i) = self else {
             unreachable!("invalid value given to incrgaps")
         };
-        crate::setgaps(
+        globals.setgaps(
             unsafe { globals.selmon.as_ref() }.gappoh + *i,
             unsafe { globals.selmon.as_ref() }.gappov + *i,
             unsafe { globals.selmon.as_ref() }.gappih,
             unsafe { globals.selmon.as_ref() }.gappiv,
-            globals,
         );
     }
 
@@ -1056,12 +1053,11 @@ impl Arg {
         let Arg::I(i) = self else {
             unreachable!("invalid value given to incrgaps")
         };
-        crate::setgaps(
+        globals.setgaps(
             unsafe { globals.selmon.as_ref() }.gappoh,
             unsafe { globals.selmon.as_ref() }.gappov + *i,
             unsafe { globals.selmon.as_ref() }.gappih,
             unsafe { globals.selmon.as_ref() }.gappiv,
-            globals,
         );
     }
 
@@ -1070,12 +1066,11 @@ impl Arg {
         let Arg::I(i) = self else {
             unreachable!("invalid value given to incrgaps")
         };
-        crate::setgaps(
+        globals.setgaps(
             unsafe { globals.selmon.as_ref() }.gappoh,
             unsafe { globals.selmon.as_ref() }.gappov,
             unsafe { globals.selmon.as_ref() }.gappih + *i,
             unsafe { globals.selmon.as_ref() }.gappiv,
-            globals,
         );
     }
 
@@ -1084,12 +1079,11 @@ impl Arg {
         let Arg::I(i) = self else {
             unreachable!("invalid value given to incrgaps")
         };
-        crate::setgaps(
+        globals.setgaps(
             unsafe { globals.selmon.as_ref() }.gappoh,
             unsafe { globals.selmon.as_ref() }.gappov,
             unsafe { globals.selmon.as_ref() }.gappih,
             unsafe { globals.selmon.as_ref() }.gappiv + *i,
-            globals,
         );
     }
 }
