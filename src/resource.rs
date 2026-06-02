@@ -44,6 +44,20 @@ pub(crate) struct ResourceConfig {
     pub(crate) default_value: ResourceValConfig,
 }
 
+#[macro_export]
+macro_rules! load_resource {
+    ($name:expr, $globals:expr, $variant:ident) => {{
+        let $crate::resource::ResourceVal::$variant(value) = $globals
+            .resources
+            .get($name)
+            .unwrap_or_else(|| panic!("{} is not in the resources map", $name))
+        else {
+            unreachable!("invalid type of variable {} in Resources map", $name);
+        };
+        *value
+    }};
+}
+
 fn resource_load(db: XrmDatabase, name: &str, value: &mut ResourceVal) {
     let mut fullname: [i8; 256] = [0; 256];
     //NOTE: `type` points into XrmDatabase's internal memory — must not be freed.

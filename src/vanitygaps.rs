@@ -1,4 +1,4 @@
-use crate::{Arg, Client, Globals, Monitor, resize};
+use crate::{Arg, Client, Globals, Monitor};
 // arrange, load_resource_bool, nexttiled, resize};
 use std::ffi::CString;
 
@@ -129,9 +129,9 @@ pub(crate) fn getgaps(m: &Monitor, globals: &mut Globals) -> (i32, i32, i32, i32
     let ie = globals.enable_gaps as i32;
     let mut oe = ie;
     let mut n = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(c_inner) = c {
-        c = crate::Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+        c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
         n += 1;
     }
     if crate::load_resource!("SMART_GAPS", globals, Bool) && n == 1 {
@@ -153,25 +153,25 @@ pub(crate) fn getfacts(m: &Monitor, msize: i32, ssize: i32) -> (f32, f32, i32, i
     let mut stotal = 0;
 
     let mut n = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(c_inner) = c {
         if n < m.nmaster {
             mfacts += unsafe { c_inner.as_ref() }.cfact;
         } else {
             sfacts += unsafe { c_inner.as_ref() }.cfact;
         }
-        c = crate::Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+        c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
         n += 1;
     }
     n = 0;
-    c = crate::Client::nexttiled(m.clients);
+    c = Client::nexttiled(m.clients);
     while let Some(c_inner) = c {
         if n < m.nmaster {
             mtotal += msize * ((unsafe { c_inner.as_ref() }.cfact / mfacts) as i32);
         } else {
             stotal += ssize * ((unsafe { c_inner.as_ref() }.cfact / sfacts) as i32);
         }
-        c = crate::Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+        c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
         n += 1
     }
 
@@ -210,10 +210,10 @@ pub(crate) fn bstack(m: &mut Monitor, globals: &mut Globals) {
     let (mfacts, sfacts, mrest, srest) = getfacts(m, mw, sw);
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut c_inner) = c {
         if i < m.nmaster {
-            crate::resize(
+            Client::resize(
                 unsafe { c_inner.as_mut() },
                 mx,
                 my,
@@ -226,7 +226,7 @@ pub(crate) fn bstack(m: &mut Monitor, globals: &mut Globals) {
             );
             mx += unsafe { c_inner.as_ref() }.width() + iv;
         } else {
-            crate::resize(
+            Client::resize(
                 unsafe { c_inner.as_mut() },
                 sx,
                 sy,
@@ -239,7 +239,7 @@ pub(crate) fn bstack(m: &mut Monitor, globals: &mut Globals) {
             );
             sx += unsafe { c_inner.as_ref() }.width() + iv;
         }
-        c = crate::Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+        c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
         i += 1;
     }
 }
@@ -269,10 +269,10 @@ pub(crate) fn bstackhoriz(m: &mut Monitor, globals: &mut Globals) {
     let (mfacts, sfacts, mrest, srest) = getfacts(m, mw, sh);
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut ci) = c {
         if i < m.nmaster {
-            crate::resize(
+            Client::resize(
                 unsafe { ci.as_mut() },
                 mx,
                 my,
@@ -285,7 +285,7 @@ pub(crate) fn bstackhoriz(m: &mut Monitor, globals: &mut Globals) {
             );
             mx += unsafe { ci.as_ref() }.width() + iv;
         } else {
-            crate::resize(
+            Client::resize(
                 unsafe { ci.as_mut() },
                 sx,
                 sy,
@@ -298,7 +298,7 @@ pub(crate) fn bstackhoriz(m: &mut Monitor, globals: &mut Globals) {
             );
             sy += unsafe { ci.as_ref() }.height() + ih;
         }
-        c = crate::Client::nexttiled(unsafe { ci.as_ref() }.next);
+        c = Client::nexttiled(unsafe { ci.as_ref() }.next);
         i += 1;
     }
 }
@@ -360,7 +360,7 @@ pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
     let mut lfacts = 0.0;
     let mut rfacts = 0.0;
     let mut n = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(ci) = c {
         if m.nmaster == 0 || n < m.nmaster {
             mfacts += unsafe { ci.as_ref() }.cfact;
@@ -369,14 +369,14 @@ pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
         } else {
             rfacts += unsafe { ci.as_ref() }.cfact; // total factor of right hand stack area
         }
-        c = crate::Client::nexttiled(unsafe { ci.as_ref() }.next);
+        c = Client::nexttiled(unsafe { ci.as_ref() }.next);
     }
 
     n = 0;
     let mut mtotal = 0;
     let mut ltotal = 0;
     let mut rtotal = 0;
-    c = crate::Client::nexttiled(m.clients);
+    c = Client::nexttiled(m.clients);
     while let Some(ci) = c {
         if m.nmaster == 0 || n < m.nmaster {
             mtotal += (mh as f32 * (unsafe { ci.as_ref() }.cfact / mfacts)) as i32;
@@ -385,7 +385,7 @@ pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
         } else {
             rtotal += (rh as f32 * (unsafe { ci.as_ref() }.cfact / rfacts)) as i32;
         }
-        c = crate::Client::nexttiled(unsafe { ci.as_ref() }.next);
+        c = Client::nexttiled(unsafe { ci.as_ref() }.next);
         n += 1
     }
     let mrest = mh - mtotal;
@@ -393,11 +393,11 @@ pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
     let rrest = rh - rtotal;
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut ci) = c {
         if m.nmaster == 0 || i < m.nmaster {
             /* nmaster clients are stacked vertically, in the center of the screen */
-            crate::resize(
+            Client::resize(
                 unsafe { ci.as_mut() },
                 mx,
                 my,
@@ -412,7 +412,7 @@ pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
         } else {
             /* stack clients are stacked vertically */
             if (i - m.nmaster) % 2 == 0 {
-                crate::resize(
+                Client::resize(
                     unsafe { ci.as_mut() },
                     lx,
                     ly,
@@ -429,7 +429,7 @@ pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
                 );
                 ly += unsafe { ci.as_ref() }.height() + ih;
             } else {
-                crate::resize(
+                Client::resize(
                     unsafe { ci.as_mut() },
                     rx,
                     ry,
@@ -447,7 +447,7 @@ pub(crate) fn centeredmaster(m: &mut Monitor, globals: &mut Globals) {
                 ry += unsafe { ci.as_ref() }.height() + ih;
             }
         }
-        c = crate::Client::nexttiled(unsafe { ci.as_ref() }.next);
+        c = Client::nexttiled(unsafe { ci.as_ref() }.next);
         i += 1;
     }
 }
@@ -491,12 +491,12 @@ pub(crate) fn centeredfloatingmaster(m: &mut Monitor, globals: &mut Globals) {
 
     let (mfacts, sfacts, mrest, srest) = getfacts(m, mw, sw);
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut ci) = c {
         let cr = unsafe { ci.as_mut() };
         if i < m.nmaster {
             /* nmaster clients are stacked horizontally, in the center of the screen */
-            crate::resize(
+            Client::resize(
                 cr,
                 mx,
                 my,
@@ -509,7 +509,7 @@ pub(crate) fn centeredfloatingmaster(m: &mut Monitor, globals: &mut Globals) {
             mx += cr.width() + (iv as f32 * mivf) as i32;
         } else {
             /* stack clients are stacked horizontally */
-            crate::resize(
+            Client::resize(
                 cr,
                 sx,
                 sy,
@@ -557,11 +557,11 @@ pub(crate) fn deck(m: &mut Monitor, globals: &mut Globals) {
     }
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut ci) = c {
         let cr = unsafe { ci.as_mut() };
         if i < m.nmaster {
-            crate::resize(
+            Client::resize(
                 cr,
                 mx,
                 my,
@@ -573,7 +573,7 @@ pub(crate) fn deck(m: &mut Monitor, globals: &mut Globals) {
             );
             my += cr.height() + ih;
         } else {
-            crate::resize(
+            Client::resize(
                 cr,
                 sx,
                 sy,
@@ -584,7 +584,7 @@ pub(crate) fn deck(m: &mut Monitor, globals: &mut Globals) {
             );
         }
         i += 1;
-        c = crate::Client::nexttiled(cr.next)
+        c = Client::nexttiled(cr.next)
     }
 }
 
@@ -599,7 +599,7 @@ pub(crate) fn fibonacci(m: &mut Monitor, s: bool, globals: &mut Globals) {
     let mut nh = m.wh - 2 * oh;
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     let mut r = true;
     let mut hrest = 0;
     let mut wrest = 0;
@@ -669,7 +669,7 @@ pub(crate) fn fibonacci(m: &mut Monitor, s: bool, globals: &mut Globals) {
             i += 1;
         }
 
-        crate::resize(
+        Client::resize(
             cr,
             nx,
             ny,
@@ -678,7 +678,7 @@ pub(crate) fn fibonacci(m: &mut Monitor, s: bool, globals: &mut Globals) {
             false,
             globals,
         );
-        c = crate::Client::nexttiled(cr.next);
+        c = Client::nexttiled(cr.next);
     }
 }
 
@@ -720,7 +720,7 @@ pub(crate) fn gaplessgrid(m: &mut Monitor, globals: &mut Globals) {
     let y = m.wy + oh;
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut ci) = c {
         let cr = unsafe { ci.as_mut() };
         if i / rows + 1 > cols - (n as i32) % cols {
@@ -728,7 +728,7 @@ pub(crate) fn gaplessgrid(m: &mut Monitor, globals: &mut Globals) {
             ch = (m.wh - 2 * oh - ih * (rows - 1)) / rows;
             rrest = (m.wh - 2 * oh - ih * (rows - 1)) - ch * rows;
         }
-        crate::resize(
+        Client::resize(
             cr,
             x,
             y + rn * (ch + ih) + rn.min(rrest),
@@ -744,7 +744,7 @@ pub(crate) fn gaplessgrid(m: &mut Monitor, globals: &mut Globals) {
             cn += 1;
         }
         i += 1;
-        c = crate::Client::nexttiled(cr.next);
+        c = Client::nexttiled(cr.next);
     }
 }
 
@@ -773,14 +773,14 @@ pub(crate) fn grid(m: &mut Monitor, globals: &mut Globals) {
     let cwrest = (m.ww - 2 * ov - iv * (cols - 1)) - cw * cols;
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut ci) = c {
         let c_ref = unsafe { ci.as_mut() };
         let cc = i / rows;
         let cr = i % rows;
         let cx = m.wx + ov + cc * (cw + iv) + cc.min(cwrest);
         let cy = m.wy + oh + cr * (ch + ih) + cr.min(chrest);
-        crate::resize(
+        Client::resize(
             c_ref,
             cx,
             cy,
@@ -790,7 +790,7 @@ pub(crate) fn grid(m: &mut Monitor, globals: &mut Globals) {
             globals,
         );
 
-        c = crate::Client::nexttiled(c_ref.next);
+        c = Client::nexttiled(c_ref.next);
         i += 1;
     }
 }
@@ -827,7 +827,7 @@ pub(crate) fn horizgrid(m: &mut Monitor, globals: &mut Globals) {
 
     /* calculate facts */
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     let mut mfacts = 0.0;
     let mut sfacts = 0.0;
     while let Some(mut ci) = c {
@@ -838,11 +838,11 @@ pub(crate) fn horizgrid(m: &mut Monitor, globals: &mut Globals) {
             sfacts += cr.cfact;
         }
         i += 1;
-        c = crate::Client::nexttiled(cr.next);
+        c = Client::nexttiled(cr.next);
     }
 
     i = 0;
-    c = crate::Client::nexttiled(m.clients);
+    c = Client::nexttiled(m.clients);
     let mut mtotal = 0;
     let mut stotal = 0;
     while let Some(mut ci) = c {
@@ -853,16 +853,16 @@ pub(crate) fn horizgrid(m: &mut Monitor, globals: &mut Globals) {
             stotal += (sw as f32 * (cr.cfact / sfacts)) as i32;
         }
         i += 1;
-        c = crate::Client::nexttiled(cr.next);
+        c = Client::nexttiled(cr.next);
     }
     let mrest = mh - mtotal;
     let srest = sw - stotal;
     i = 0;
-    c = crate::Client::nexttiled(m.clients);
+    c = Client::nexttiled(m.clients);
     while let Some(mut ci) = c {
         let cr = unsafe { ci.as_mut() };
         if i < ntop {
-            crate::resize(
+            Client::resize(
                 cr,
                 mx,
                 my,
@@ -874,7 +874,7 @@ pub(crate) fn horizgrid(m: &mut Monitor, globals: &mut Globals) {
             );
             mx += cr.width() + iv;
         } else {
-            crate::resize(
+            Client::resize(
                 cr,
                 sx,
                 sy,
@@ -888,7 +888,7 @@ pub(crate) fn horizgrid(m: &mut Monitor, globals: &mut Globals) {
             sx += cr.width() + iv;
         }
         i += 1;
-        c = crate::Client::nexttiled(cr.next);
+        c = Client::nexttiled(cr.next);
     }
 }
 
@@ -923,7 +923,7 @@ pub(crate) fn nrowgrid(m: &mut Monitor, globals: &mut Globals) {
     let ch = (m.wh - 2 * oh - ih * (rows - 1)) / rows;
     let mut uh = ch;
 
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut c_inner) = c {
         let c_ref = unsafe { c_inner.as_mut() };
         if ci == cols {
@@ -942,7 +942,7 @@ pub(crate) fn nrowgrid(m: &mut Monitor, globals: &mut Globals) {
         let cw = (m.ww - 2 * ov - uw) / (cols - ci);
         uw += cw + iv;
 
-        crate::resize(
+        Client::resize(
             c_ref,
             cx,
             cy,
@@ -951,7 +951,7 @@ pub(crate) fn nrowgrid(m: &mut Monitor, globals: &mut Globals) {
             false,
             globals,
         );
-        c = crate::Client::nexttiled(c_ref.next);
+        c = Client::nexttiled(c_ref.next);
         ci += 1;
     }
 }
@@ -979,10 +979,10 @@ pub(crate) fn tile(m: &mut Monitor, globals: &mut Globals) {
     let (mfacts, sfacts, mrest, srest) = getfacts(m, mh, sh);
 
     let mut i = 0;
-    let mut c = crate::Client::nexttiled(m.clients);
+    let mut c = Client::nexttiled(m.clients);
     while let Some(mut c_inner) = c {
         if i < m.nmaster {
-            crate::resize(
+            Client::resize(
                 unsafe { c_inner.as_mut() },
                 mx,
                 my,
@@ -995,7 +995,7 @@ pub(crate) fn tile(m: &mut Monitor, globals: &mut Globals) {
             );
             my += unsafe { c_inner.as_ref() }.height() + ih;
         } else {
-            crate::resize(
+            Client::resize(
                 unsafe { c_inner.as_mut() },
                 sx,
                 sy,
@@ -1008,7 +1008,7 @@ pub(crate) fn tile(m: &mut Monitor, globals: &mut Globals) {
             );
             sy += unsafe { c_inner.as_ref() }.height() + ih;
         }
-        c = crate::Client::nexttiled(unsafe { c_inner.as_ref() }.next);
+        c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
         i += 1;
     }
 }
@@ -1035,7 +1035,7 @@ pub(crate) fn monocle(m: &mut Monitor, globals: &mut Globals) {
     let mut c = Client::nexttiled(m.clients);
     while let Some(mut c_inner) = c {
         let (bw, next) = unsafe { (c_inner.as_ref().bw, c_inner.as_ref().next) };
-        resize(
+        Client::resize(
             unsafe { c_inner.as_mut() },
             m.wx,
             m.wy,

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_int};
 use std::io::{Write, stderr};
 use std::mem::MaybeUninit;
@@ -10,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::client::Client;
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
-use crate::resource::{ResourceConfig, ResourceVal, Resources};
+use crate::resource::{ResourceVal, Resources};
 
 mod client;
 mod config;
@@ -204,20 +203,6 @@ const fn shift(tag: u32, i: i32) -> u32 {
     } else {
         (tag >> (-i) as u32) | (tag << (config::TAGS.len() as u32 - (-i) as u32))
     }
-}
-
-#[macro_export]
-macro_rules! load_resource {
-    ($name:expr, $globals:expr, $variant:ident) => {{
-        let $crate::resource::ResourceVal::$variant(value) = $globals
-            .resources
-            .get($name)
-            .unwrap_or_else(|| panic!("{} is not in the resources map", $name))
-        else {
-            unreachable!("invalid type of variable {} in Resources map", $name);
-        };
-        *value
-    }};
 }
 
 const fn event_handler(event_type: i32) -> Option<EventHandlerFunction> {
