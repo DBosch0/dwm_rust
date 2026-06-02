@@ -4,7 +4,7 @@ use crate::{
     CURSOR_STATE_MOVE, CURSOR_STATE_RESIZE, ClickState, Globals, Layout, MOUSE_MASK, PREV_SEL,
     TAGMASK, WM_DELETE,
     client::Client,
-    die, event_handler,
+    die,
     external_functions::{
         BUTTON_RELEASE, CONFIGURE_REQUEST, CURRENT_TIME, ENTER_WINDOW_MASK, EXPOSE, EXPOSURE_MASK,
         GRAB_MODE_ASYNC, KeySym, MAP_REQUEST, MOTION_NOTIFY, SUBSTRUCTURE_REDIRECT_MASK, Time,
@@ -627,7 +627,9 @@ impl Arg {
             };
             match unsafe { ev.r#type } {
                 CONFIGURE_REQUEST | EXPOSE | MAP_REQUEST => {
-                    event_handler(unsafe { ev.r#type }).expect("valid function")(&mut ev, globals)
+                    crate::event::event_handler(unsafe { ev.r#type }).expect("valid function")(
+                        &mut ev, globals,
+                    )
                 }
                 MOTION_NOTIFY => {
                     if unsafe { ev.xmotion }.time - lasttime
@@ -764,7 +766,9 @@ impl Arg {
             };
             match unsafe { ev.r#type } {
                 CONFIGURE_REQUEST | EXPOSE | MAP_REQUEST => {
-                    event_handler(unsafe { ev.r#type }).expect("valid function")(&mut ev, globals)
+                    crate::event::event_handler(unsafe { ev.r#type }).expect("valid function")(
+                        &mut ev, globals,
+                    )
                 }
                 MOTION_NOTIFY => {
                     if unsafe { ev.xmotion.time } - lasttime
