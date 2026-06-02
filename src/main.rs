@@ -21,7 +21,6 @@ mod external_functions;
 mod monitor;
 mod resource;
 mod util;
-mod vanitygaps;
 
 const VERSION: &str = "0.0.1";
 const NUMTAGS: u32 = (config::TAGS.len() + config::SCRATCHPADS.len()) as u32;
@@ -171,6 +170,28 @@ const fn event_handler(event_type: i32) -> Option<EventHandlerFunction> {
         MAPPING_NOTIFY => Some(mappingnotify),
         _ => None,
     }
+}
+
+#[allow(dead_code)]
+pub(crate) fn setgaps(mut oh: i32, mut ov: i32, mut ih: i32, mut iv: i32, globals: &mut Globals) {
+    if oh < 0 {
+        oh = 0
+    };
+    if ov < 0 {
+        ov = 0
+    };
+    if ih < 0 {
+        ih = 0
+    };
+    if iv < 0 {
+        iv = 0
+    };
+
+    unsafe { globals.selmon.as_mut() }.gappoh = oh;
+    unsafe { globals.selmon.as_mut() }.gappov = ov;
+    unsafe { globals.selmon.as_mut() }.gappih = ih;
+    unsafe { globals.selmon.as_mut() }.gappiv = iv;
+    Monitor::arrange(Some(globals.selmon), globals);
 }
 
 fn winpid(w: Window, globals: &Globals) -> libc::pid_t {

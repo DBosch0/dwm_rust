@@ -987,4 +987,105 @@ impl Arg {
         shifted = shift(shifted, *ai);
         Arg::Ui(shifted).swaptags(globals);
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn togglegaps(_arg: &Arg, globals: &mut Globals) {
+        globals.enable_gaps = !globals.enable_gaps;
+        Monitor::arrange(None, globals);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn defaultgaps(&self, globals: &mut Globals) {
+        crate::setgaps(
+            crate::load_resource!("GAPP_OH", globals, Integer) as i32,
+            crate::load_resource!("GAPP_OV", globals, Integer) as i32,
+            crate::load_resource!("GAPP_IH", globals, Integer) as i32,
+            crate::load_resource!("GAPP_IV", globals, Integer) as i32,
+            globals,
+        );
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn incrgaps(&self, globals: &mut Globals) {
+        let Arg::I(i) = self else {
+            unreachable!("invalid value given to incrgaps")
+        };
+        crate::setgaps(
+            unsafe { globals.selmon.as_ref() }.gappoh + *i,
+            unsafe { globals.selmon.as_ref() }.gappov + *i,
+            unsafe { globals.selmon.as_ref() }.gappih + *i,
+            unsafe { globals.selmon.as_ref() }.gappiv + *i,
+            globals,
+        );
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn incrigaps(&self, globals: &mut Globals) {
+        let Arg::I(i) = self else {
+            unreachable!("invalid value given to incrgaps")
+        };
+        crate::setgaps(
+            unsafe { globals.selmon.as_ref() }.gappoh,
+            unsafe { globals.selmon.as_ref() }.gappov,
+            unsafe { globals.selmon.as_ref() }.gappih + *i,
+            unsafe { globals.selmon.as_ref() }.gappiv + *i,
+            globals,
+        );
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn incrogaps(&self, globals: &mut Globals) {
+        let Arg::I(i) = self else {
+            unreachable!("invalid value given to incrgaps")
+        };
+        crate::setgaps(
+            unsafe { globals.selmon.as_ref() }.gappoh + *i,
+            unsafe { globals.selmon.as_ref() }.gappov + *i,
+            unsafe { globals.selmon.as_ref() }.gappih,
+            unsafe { globals.selmon.as_ref() }.gappiv,
+            globals,
+        );
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn incrovgaps(&self, globals: &mut Globals) {
+        let Arg::I(i) = self else {
+            unreachable!("invalid value given to incrgaps")
+        };
+        crate::setgaps(
+            unsafe { globals.selmon.as_ref() }.gappoh,
+            unsafe { globals.selmon.as_ref() }.gappov + *i,
+            unsafe { globals.selmon.as_ref() }.gappih,
+            unsafe { globals.selmon.as_ref() }.gappiv,
+            globals,
+        );
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn incrihgaps(&self, globals: &mut Globals) {
+        let Arg::I(i) = self else {
+            unreachable!("invalid value given to incrgaps")
+        };
+        crate::setgaps(
+            unsafe { globals.selmon.as_ref() }.gappoh,
+            unsafe { globals.selmon.as_ref() }.gappov,
+            unsafe { globals.selmon.as_ref() }.gappih + *i,
+            unsafe { globals.selmon.as_ref() }.gappiv,
+            globals,
+        );
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn incrivgaps(&self, globals: &mut Globals) {
+        let Arg::I(i) = self else {
+            unreachable!("invalid value given to incrgaps")
+        };
+        crate::setgaps(
+            unsafe { globals.selmon.as_ref() }.gappoh,
+            unsafe { globals.selmon.as_ref() }.gappov,
+            unsafe { globals.selmon.as_ref() }.gappih,
+            unsafe { globals.selmon.as_ref() }.gappiv + *i,
+            globals,
+        );
+    }
 }
