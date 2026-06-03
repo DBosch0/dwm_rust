@@ -11,7 +11,8 @@ pub(crate) use crate::client::Client;
 use crate::drw::{Clr, Cur, Drw};
 use crate::external_functions::*;
 pub(crate) use crate::monitor::Monitor;
-pub(crate) use crate::resource::{ResourceVal, Resources};
+pub(crate) use crate::resource::Resources;
+use crate::resource::{borrow_resource, load_resource};
 pub(crate) use monitor::layouts::Layout;
 
 mod argument;
@@ -188,18 +189,10 @@ impl Globals {
 
     #[allow(dead_code)]
     pub(crate) fn setgaps(&mut self, mut oh: i32, mut ov: i32, mut ih: i32, mut iv: i32) {
-        if oh < 0 {
-            oh = 0
-        };
-        if ov < 0 {
-            ov = 0
-        };
-        if ih < 0 {
-            ih = 0
-        };
-        if iv < 0 {
-            iv = 0
-        };
+        oh = oh.max(0);
+        ov = ov.max(0);
+        ih = ih.max(0);
+        iv = iv.max(0);
 
         unsafe { self.selmon.as_mut() }.gappoh = oh;
         unsafe { self.selmon.as_mut() }.gappov = ov;
@@ -233,7 +226,7 @@ impl Globals {
             spec = unsafe { &*i.data }.spec;
             if spec.mask & XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID != 0 {
                 let t = unsafe { xcb_res_client_id_value_value(i.data) };
-                result = unsafe { *t } as i32;
+                result = unsafe { *t } as libc::pid_t;
                 break;
             }
             unsafe { xcb_res_client_id_value_next(&mut i) }
@@ -242,7 +235,7 @@ impl Globals {
         unsafe { libc::free(r as *mut c_void) };
 
         if result == (-1) as libc::pid_t {
-            result = 0;
+            result = 0 as libc::pid_t;
         }
         result
     }
@@ -271,21 +264,23 @@ impl Globals {
         let mut dirty = false;
 
         #[cfg(feature = "xinerama")]
-        {}
+        {
+            todo!("feature: xinerama")
+        }
 
         // We are in initialization
         if !self.running {
             self.mons = Monitor::createmon(self);
         }
 
-        let mons_ref = unsafe { self.mons.as_mut() };
-        if mons_ref.mw != self.sw || mons_ref.mh != self.sh {
+        let m = unsafe { self.mons.as_mut() };
+        if m.mw != self.sw || m.mh != self.sh {
             dirty = true;
-            mons_ref.ww = self.sw;
-            mons_ref.mw = mons_ref.ww;
-            mons_ref.wh = self.sh;
-            mons_ref.mh = mons_ref.wh;
-            mons_ref.updatebarpos(self);
+            m.ww = self.sw;
+            m.mw = m.ww;
+            m.wh = self.sh;
+            m.mh = m.wh;
+            m.updatebarpos(self);
         }
         if dirty {
             self.selmon = self.mons;
@@ -296,7 +291,7 @@ impl Globals {
     }
 
     fn updatebars(&self) {
-        let mut wa: XSetWindowAttributes = unsafe { std::mem::zeroed() };
+        let mut wa: XSetWindowAttributes = unsafe { core::mem::zeroed() };
         wa.override_redirect = 1;
         wa.background_pixel = PARENT_RELATIVE;
         wa.event_mask = BUTTON_PRESS_MASK | EXPOSURE_MASK;
@@ -441,10 +436,9 @@ impl Globals {
             self.statusw = self.text_w(stext_ptr) - self.lrpad + 2;
         } else {
             self.statusw = 0;
-            let mut text = self.stext.as_mut_ptr();
+            let mut text = self.stext.as_ptr();
             let mut s = self.stext.as_mut_ptr();
             while unsafe { *s } != 0 {
-                // for (text = s = stext; *s; s++) {
                 if (unsafe { *s } as u8) < b' ' {
                     let ch = unsafe { *s };
                     unsafe { *s = '\0' as i8 };
@@ -469,11 +463,9 @@ impl Globals {
         for i in 0..8 {
             for j in 0..unsafe { &*modmap }.max_keypermod {
                 if unsafe {
-                    *{
-                        { &*modmap }
-                            .modifiermap
-                            .add((i * { &*modmap }.max_keypermod + j) as usize)
-                    }
+                    *{ &*modmap }
+                        .modifiermap
+                        .add((i * { &*modmap }.max_keypermod + j) as usize)
                 } == unsafe { XKeysymToKeycode(self.dpy.as_ptr(), XK_NUM_LOCK) }
                 {
                     self.numlockmask = 1 << i;
@@ -504,17 +496,15 @@ impl Globals {
             }
 
             for k in start..=end {
-                for i in 0..config::KEYS.len() {
+                for key in config::KEYS {
                     /* skip modifier codes, we do that ourselves */
-                    if config::KEYS[i].keysym
-                        == unsafe { *syms.add((k - start) as usize * skip as usize) }
-                    {
+                    if key.keysym == unsafe { *syms.add((k - start) as usize * skip as usize) } {
                         for modi in modifiers {
                             unsafe {
                                 XGrabKey(
                                     self.dpy.as_ptr(),
                                     k,
-                                    config::KEYS[i].r#mod | modi,
+                                    key.r#mod | modi,
                                     self.root,
                                     1,
                                     GRAB_MODE_ASYNC,
@@ -627,14 +617,15 @@ impl Globals {
             term = c_ref.termforwin(self);
         }
 
-        if c_ref.x + c_ref.width() > unsafe { c_ref.mon.as_ref().wx + c_ref.mon.as_ref().ww } {
-            c_ref.x = unsafe { c_ref.mon.as_ref().wx + c_ref.mon.as_ref().ww } - c_ref.width();
+        let c_ref_mon = unsafe { c_ref.mon.as_ref() };
+        if c_ref.x + c_ref.width() > c_ref_mon.wx + c_ref_mon.ww {
+            c_ref.x = c_ref_mon.wx + c_ref_mon.ww - c_ref.width();
         }
-        if c_ref.y + c_ref.height() > unsafe { c_ref.mon.as_ref().wy + c_ref.mon.as_ref().wh } {
-            c_ref.y = unsafe { c_ref.mon.as_ref().wy + c_ref.mon.as_ref().wh } - c_ref.height();
+        if c_ref.y + c_ref.height() > c_ref_mon.wy + c_ref_mon.wh {
+            c_ref.y = c_ref_mon.wy + c_ref_mon.wh - c_ref.height();
         }
-        c_ref.x = c_ref.x.max(unsafe { c_ref.mon.as_ref() }.wx);
-        c_ref.y = c_ref.y.max(unsafe { c_ref.mon.as_ref() }.wy);
+        c_ref.x = c_ref.x.max(c_ref_mon.wx);
+        c_ref.y = c_ref.y.max(c_ref_mon.wy);
         c_ref.bw = load_resource!("BORDER_PX", self, Integer) as i32;
 
         wc.border_width = c_ref.bw;
@@ -664,12 +655,12 @@ impl Globals {
             )
         };
         c_ref.grabbuttons(false, self);
-        if !unsafe { c.as_ref() }.isfloating {
-            unsafe { c.as_mut().oldstate = trans != 0 || c.as_ref().isfixed };
-            unsafe { c.as_mut().isfloating = c.as_ref().oldstate };
+        if !c_ref.isfloating {
+            c_ref.oldstate = trans != 0 || c_ref.isfixed;
+            c_ref.isfloating = c_ref.oldstate;
         }
-        if unsafe { c.as_ref() }.isfloating {
-            unsafe { XRaiseWindow(self.dpy.as_ptr(), c.as_ref().win) };
+        if c_ref.isfloating {
+            unsafe { XRaiseWindow(self.dpy.as_ptr(), c_ref.win) };
         }
         Client::attach(c);
         Client::attachstack(c);
@@ -681,27 +672,27 @@ impl Globals {
                 XA_WINDOW,
                 32,
                 PROP_MODE_APPEND,
-                (&c.as_ref().win) as *const _ as *const u8,
+                (&c_ref.win) as *const _ as *const u8,
                 1,
             )
         };
         unsafe {
             XMoveResizeWindow(
                 self.dpy.as_ptr(),
-                c.as_ref().win,
-                c.as_ref().x + 2 * self.sw,
-                c.as_ref().y,
-                c.as_ref().w as u32,
-                c.as_ref().h as u32,
+                c_ref.win,
+                c_ref.x + 2 * self.sw,
+                c_ref.y,
+                c_ref.w as u32,
+                c_ref.h as u32,
             ); /* some windows require this */
         }
         c_ref.setclientstate(NORMAL_STATE as i64, self);
-        if unsafe { c.as_ref() }.mon == self.selmon {
+        if c_ref.mon == self.selmon {
             Client::unfocus(unsafe { self.selmon.as_ref() }.sel, false, self);
         }
-        unsafe { c.as_mut().mon.as_mut() }.sel = Some(c);
-        Monitor::arrange(Some(unsafe { c.as_ref() }.mon), self);
-        unsafe { XMapWindow(self.dpy.as_ptr(), c.as_ref().win) };
+        unsafe { c_ref.mon.as_mut() }.sel = Some(c);
+        Monitor::arrange(Some(c_ref.mon), self);
+        unsafe { XMapWindow(self.dpy.as_ptr(), c_ref.win) };
 
         if let Some(term) = term {
             Client::swallow(term, c, self);
@@ -716,8 +707,10 @@ impl Globals {
         }
         let mut m = Some(self.mons);
         while let Some(m_inner) = m {
+            let mr = unsafe { m_inner.as_ref() };
             let mut c = unsafe { m_inner.as_ref() }.clients;
             while let Some(c_inner) = c {
+                let cr = unsafe { c_inner.as_ref() };
                 unsafe {
                     XChangeProperty(
                         self.dpy.as_ptr(),
@@ -726,13 +719,13 @@ impl Globals {
                         XA_WINDOW,
                         32,
                         PROP_MODE_APPEND,
-                        (&c_inner.as_ref().win) as *const _ as *const u8,
+                        (&cr.win) as *const _ as *const u8,
                         1,
                     )
                 };
-                c = unsafe { c_inner.as_ref() }.next;
+                c = cr.next;
             }
-            m = unsafe { m_inner.as_ref() }.next
+            m = mr.next
         }
     }
 
@@ -740,8 +733,8 @@ impl Globals {
         let mut ev: XEvent = unsafe { core::mem::zeroed() };
         unsafe { XSync(self.dpy.as_ptr(), 0) };
         while self.running && unsafe { XNextEvent(self.dpy.as_ptr(), &mut ev) } == 0 {
-            if let Some(f) = event::event_handler(unsafe { ev.r#type }) {
-                f(&mut ev, self)
+            if let Some(event_handler_function) = event::event_handler(unsafe { ev.r#type }) {
+                event_handler_function(&mut ev, self)
             }
         }
     }
@@ -751,7 +744,7 @@ impl Globals {
         let mut d1: Window = 0;
         let mut d2: Window = 0;
         let mut wins: *mut Window = core::ptr::null_mut();
-        let mut wa: XWindowAttributes = unsafe { std::mem::zeroed() };
+        let mut wa: XWindowAttributes = unsafe { core::mem::zeroed() };
 
         const IS_VIEWABLE: i32 = 2;
         const ICONIC_STATE: i64 = 3;
@@ -801,7 +794,7 @@ impl Globals {
 
     fn setup(dpy: NonNull<Display>, resources: Resources, xcon: NonNull<xcb_connection_t>) -> Self {
         /* do not transform children into zombies when they terminate */
-        let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+        let mut sa: libc::sigaction = unsafe { core::mem::zeroed() };
         unsafe { libc::sigemptyset(&mut sa.sa_mask) };
         sa.sa_flags = libc::SA_NOCLDSTOP | libc::SA_NOCLDWAIT | libc::SA_RESTART;
         sa.sa_sigaction = libc::SIG_IGN;
@@ -854,6 +847,7 @@ impl Globals {
             enable_gaps: true,
         };
 
+        // Sets values for mons and selmon
         globals.updategeom();
         globals.running = true;
 
@@ -889,18 +883,11 @@ impl Globals {
         globals.cursor[CURSOR_STATE_RESIZE] = globals.drw.cur_create(XC_SIZING);
         globals.cursor[CURSOR_STATE_MOVE] = globals.drw.cur_create(XC_FLEUR);
 
-        let mut scheme = Vec::new();
+        let mut scheme = Vec::with_capacity(config::COLORS.len());
         for pallette in config::COLORS {
-            let mut pallette_iter = pallette.iter().map(|name| {
-                let ResourceVal::String(color) = globals
-                    .resources
-                    .get(name)
-                    .expect("Color is present in the resources map")
-                else {
-                    die!("Color is not of type string in resoures map")
-                };
-                color.as_str()
-            });
+            let mut pallette_iter = pallette
+                .iter()
+                .map(|name| borrow_resource!(name, globals, String).as_str());
             let pallette: [&str; config::COLORS[0].len()] = std::array::from_fn(|_| {
                 pallette_iter.next().expect(
                 "we know by construction that there exists a constant number of values in the map",
@@ -926,9 +913,7 @@ impl Globals {
                 PROP_MODE_REPLACE,
                 (&wmcheckwin) as *const u64 as *const u8,
                 1,
-            )
-        };
-        unsafe {
+            );
             XChangeProperty(
                 dpy.as_ptr(),
                 wmcheckwin,
@@ -938,9 +923,7 @@ impl Globals {
                 PROP_MODE_REPLACE,
                 c"dwm".as_ptr() as *const u8,
                 3,
-            )
-        };
-        unsafe {
+            );
             XChangeProperty(
                 dpy.as_ptr(),
                 root,
@@ -950,10 +933,8 @@ impl Globals {
                 PROP_MODE_REPLACE,
                 (&wmcheckwin) as *const u64 as *const u8,
                 1,
-            )
-        };
-        /* EWMH support per view */
-        unsafe {
+            );
+            /* EWMH support per view */
             XChangeProperty(
                 dpy.as_ptr(),
                 root,
@@ -963,9 +944,9 @@ impl Globals {
                 PROP_MODE_REPLACE,
                 (&globals.netatom) as *const u64 as *const u8,
                 NET_LAST as i32,
-            )
+            );
+            XDeleteProperty(dpy.as_ptr(), root, globals.netatom[NET_CLIENT_LIST])
         };
-        unsafe { XDeleteProperty(dpy.as_ptr(), root, globals.netatom[NET_CLIENT_LIST]) };
 
         let mut wa: XSetWindowAttributes = unsafe { core::mem::zeroed() };
 
@@ -1013,16 +994,17 @@ impl Globals {
         const POINTER_ROOT: u64 = 1;
 
         a.view(&mut self);
-        (unsafe { self.selmon.as_mut().lt })[unsafe { self.selmon.as_ref().sellt } as usize] =
-            &EMPTY_LAYOUT;
+        let selmon = unsafe { self.selmon.as_mut() };
+        selmon.lt[selmon.sellt as usize] = &EMPTY_LAYOUT;
 
         //cleanup clients
         let mut m = Some(self.mons);
         while let Some(m_inner) = m {
-            while let Some(stack) = unsafe { m_inner.as_ref() }.stack {
+            let mr = unsafe { m_inner.as_ref() };
+            while let Some(stack) = mr.stack {
                 Client::unmanage(stack, false, &mut self)
             }
-            m = unsafe { m_inner.as_ref() }.next;
+            m = mr.next;
         }
 
         //cleanup monitors

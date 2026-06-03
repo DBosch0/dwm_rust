@@ -7,8 +7,8 @@ use crate::{
         CW_SIBLING, CW_STACK_MODE, ENTER_WINDOW_MASK, Window, XCheckMaskEvent, XConfigureWindow,
         XDestroyWindow, XEvent, XRaiseWindow, XSync, XUnmapWindow, XWindowChanges,
     },
-    load_resource,
     monitor::layouts::Layout,
+    resource::load_resource,
 };
 
 pub(crate) struct Monitor {

@@ -13,9 +13,8 @@ use crate::{
         XMoveResizeWindow, XSetCloseDownMode, XSetErrorHandler, XSync, XUngrabPointer,
         XUngrabServer, XWarpPointer, connection_number,
     },
-    load_resource,
     monitor::Monitor,
-    resource::ResourceVal,
+    resource::{ResourceVal, borrow_resource, load_resource},
     util::{shift, sptag},
 };
 
@@ -47,15 +46,14 @@ pub(crate) type ArgumentFunction = fn(&Arg, &mut Globals);
 impl Arg {
     pub(crate) fn view(&self, globals: &mut Globals) {
         let Arg::Ui(ui) = self else { unreachable!() };
-        let cur = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let selmon = unsafe { globals.selmon.as_mut() };
+        let cur = selmon.tagset[selmon.seltags as usize];
         if *ui & TAGMASK == cur {
             return;
         }
-        unsafe { globals.selmon.as_mut() }.seltags ^= 1; /* toggle sel tagset */
+        selmon.seltags ^= 1; /* toggle sel tagset */
         if *ui & TAGMASK != 0 {
-            (unsafe { globals.selmon.as_mut() }.tagset)
-                [unsafe { globals.selmon.as_ref() }.seltags as usize] = *ui & TAGMASK;
+            selmon.tagset[selmon.seltags as usize] = *ui & TAGMASK;
         }
         Client::focus(None, globals);
         Monitor::arrange(Some(globals.selmon), globals);
@@ -64,13 +62,12 @@ impl Arg {
     pub(crate) fn toggleview(&self, globals: &mut Globals) {
         let Arg::Ui(ui) = self else { unreachable!() };
 
-        let newtagset = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize]
-            ^ (*ui & TAGMASK);
+        let selmon = unsafe { globals.selmon.as_mut() };
+
+        let newtagset = selmon.tagset[selmon.seltags as usize] ^ (*ui & TAGMASK);
 
         if newtagset != 0 {
-            unsafe { globals.selmon.as_mut() }.tagset
-                [unsafe { globals.selmon.as_ref() }.seltags as usize] = newtagset;
+            selmon.tagset[selmon.seltags as usize] = newtagset;
             Client::focus(None, globals);
             Monitor::arrange(Some(globals.selmon), globals);
         }
@@ -98,9 +95,10 @@ impl Arg {
     pub(crate) fn toggletag(&self, globals: &mut Globals) {
         let Arg::Ui(ui) = self else { unreachable!() };
         if let Some(mut sel) = unsafe { globals.selmon.as_ref() }.sel {
-            let newtags = unsafe { sel.as_ref() }.tags ^ (*ui & TAGMASK);
+            let sel = unsafe { sel.as_mut() };
+            let newtags = sel.tags ^ (*ui & TAGMASK);
             if newtags != 0 {
-                unsafe { sel.as_mut() }.tags = newtags;
+                sel.tags = newtags;
                 Client::focus(None, globals);
                 Monitor::arrange(Some(globals.selmon), globals);
             }
@@ -117,32 +115,33 @@ impl Arg {
 
         let mut c = unsafe { globals.selmon.as_ref().clients };
         while let Some(ci) = c {
-            found = unsafe { ci.as_ref().tags } & scratchtag != 0;
+            let cr = unsafe { ci.as_ref() };
+            found = cr.tags & scratchtag != 0;
             if found {
                 break;
             }
-            c = unsafe { ci.as_ref().next }
+            c = cr.next
         }
+        let selmon = unsafe { globals.selmon.as_mut() };
         if found {
             let Some(c) = c else {
                 unreachable!("we are the the found branch")
             };
-            let tagset = unsafe { globals.selmon.as_ref().tagset }
-                [unsafe { globals.selmon.as_ref().seltags } as usize];
+            let tagset = selmon.tagset[selmon.seltags as usize];
             let newtagset = tagset ^ scratchtag;
             if newtagset != 0 {
-                let seltags_idx = unsafe { globals.selmon.as_ref().seltags } as usize;
-                unsafe { globals.selmon.as_mut().tagset[seltags_idx] = newtagset };
+                let seltags_idx = selmon.seltags as usize;
+                selmon.tagset[seltags_idx] = newtagset;
                 Client::focus(None, globals);
                 Monitor::arrange(Some(globals.selmon), globals);
             }
             if unsafe { c.as_ref() }.is_visible() {
                 Client::focus(Some(c), globals);
-                unsafe { globals.selmon.as_ref() }.restack(globals);
+                selmon.restack(globals);
             }
         } else {
-            let seltags_idx = unsafe { globals.selmon.as_ref().seltags } as usize;
-            unsafe { globals.selmon.as_mut().tagset[seltags_idx] |= scratchtag };
+            let seltags_idx = selmon.seltags as usize;
+            selmon.tagset[seltags_idx] |= scratchtag;
             sparg.spawn(globals);
         }
     }
@@ -203,37 +202,31 @@ impl Arg {
         let Arg::Layout(layout) = self else {
             unreachable!("invalid argument for setlayout function")
         };
-        let should_toggle = layout.is_none_or(|l| {
-            !core::ptr::eq(
-                l,
-                unsafe { globals.selmon.as_ref() }.lt
-                    [unsafe { globals.selmon.as_ref() }.sellt as usize],
-            )
-        });
+        let selmon = unsafe { globals.selmon.as_mut() };
+        let should_toggle =
+            layout.is_none_or(|l| !core::ptr::eq(l, selmon.lt[selmon.sellt as usize]));
         if should_toggle {
-            unsafe { globals.selmon.as_mut() }.sellt ^= 1;
+            selmon.sellt ^= 1;
         }
 
         if let Some(l) = layout {
-            (unsafe { globals.selmon.as_mut() }.lt)
-                [unsafe { globals.selmon.as_ref() }.sellt as usize] = l;
+            selmon.lt[selmon.sellt as usize] = l;
         }
         // symbol is &str (not null-terminated); build a CString first, matching arrangemon.
-        let sellt = unsafe { globals.selmon.as_ref() }.sellt as usize;
-        let symbol = CString::new(unsafe { globals.selmon.as_ref() }.lt[sellt].symbol)
-            .expect("layout symbol is valid CString");
+        let sellt = selmon.sellt as usize;
+        let symbol = CString::new(selmon.lt[sellt].symbol).expect("layout symbol is valid CString");
         unsafe {
             libc::strncpy(
-                globals.selmon.as_mut().ltsymbol.as_mut_ptr(),
+                selmon.ltsymbol.as_mut_ptr(),
                 symbol.as_ptr(),
-                globals.selmon.as_ref().ltsymbol.len(),
+                selmon.ltsymbol.len(),
             )
         };
 
-        if unsafe { globals.selmon.as_ref() }.sel.is_some() {
+        if selmon.sel.is_some() {
             Monitor::arrange(Some(globals.selmon), globals);
         } else {
-            unsafe { globals.selmon.as_ref() }.drawbar(globals);
+            selmon.drawbar(globals);
         }
     }
 
@@ -286,42 +279,43 @@ impl Arg {
         if i < 0 {
             return;
         }
+        let selmon = unsafe { globals.selmon.as_ref() };
         let mut p = None;
-        let mut c = unsafe { globals.selmon.as_ref() }.clients;
+        let mut c = selmon.clients;
         while let Some(c_inner) = c
             && (i > 0 || !unsafe { c_inner.as_ref() }.is_visible())
         {
-            i -= if unsafe { c_inner.as_ref() }.is_visible() {
-                1
-            } else {
-                0
-            };
+            let cr = unsafe { c_inner.as_ref() };
+            i -= if cr.is_visible() { 1 } else { 0 };
             p = c;
-            c = unsafe { c_inner.as_ref() }.next;
+            c = cr.next;
         }
         Client::focus(if c.is_some() { c } else { p }, globals);
-        unsafe { globals.selmon.as_ref() }.restack(globals);
+        selmon.restack(globals);
     }
 
     pub(crate) fn pushstack(&self, globals: &mut Globals) {
         let mut i = self.stackpos(globals);
+        let selmon = unsafe { globals.selmon.as_ref() };
 
         if i < 0 {
             return;
         } else if i == 0 {
-            let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
+            let Some(sel) = selmon.sel else {
                 unreachable!("should be unreachable state due to pushstack")
             };
             Client::detach(sel);
             Client::attach(sel);
         } else {
-            let Some(mut sel) = unsafe { globals.selmon.as_ref() }.sel else {
+            let Some(mut sel) = selmon.sel else {
                 unreachable!("should be unreachable state due to pushstack")
             };
+            let selr = unsafe { sel.as_mut() };
             let mut p = None;
-            let mut c = unsafe { globals.selmon.as_ref() }.clients;
+            let mut c = selmon.clients;
             while let Some(c_inner) = c {
-                i -= if unsafe { c_inner.as_ref() }.is_visible() && c_inner != sel {
+                let cr = unsafe { c_inner.as_ref() };
+                i -= if cr.is_visible() && c_inner != sel {
                     1
                 } else {
                     0
@@ -330,85 +324,74 @@ impl Arg {
                     break;
                 }
                 p = c;
-                c = unsafe { c_inner.as_ref() }.next;
+                c = cr.next;
             }
             let mut c = if let Some(c_inner) = c {
                 c_inner
             } else {
                 p.expect("should have value at this point if c is None")
             };
+            let c = unsafe { c.as_mut() };
             Client::detach(sel);
-            unsafe { sel.as_mut() }.next = unsafe { c.as_ref() }.next;
-            unsafe { c.as_mut() }.next = Some(sel);
+            selr.next = c.next;
+            c.next = Some(sel);
         }
         Monitor::arrange(Some(globals.selmon), globals);
     }
 
     pub(crate) fn stackpos(&self, globals: &mut Globals) -> i32 {
-        if unsafe { globals.selmon.as_ref() }.clients.is_none() {
+        let selmon = unsafe { globals.selmon.as_ref() };
+        if selmon.clients.is_none() {
             return -1;
         }
         let Arg::I(ai) = self else {
             unreachable!("invalid argument to stackpos function")
         };
         if *ai == PREV_SEL {
-            let mut l = unsafe { globals.selmon.as_ref() }.stack;
+            let mut l = selmon.stack;
             while let Some(l_inner) = l
-                && (!unsafe { l_inner.as_ref() }.is_visible()
-                    || l == unsafe { globals.selmon.as_ref() }.sel)
+                && (!unsafe { l_inner.as_ref() }.is_visible() || l == selmon.sel)
             {
                 l = unsafe { l_inner.as_ref() }.snext
             }
             let Some(l) = l else { return -1 };
             let mut i = 0;
-            let mut c = unsafe { globals.selmon.as_ref() }.clients;
+            let mut c = selmon.clients;
             while let Some(c_inner) = c
                 && c_inner != l
             {
-                i += if unsafe { c_inner.as_ref() }.is_visible() {
-                    1
-                } else {
-                    0
-                };
-                c = unsafe { c_inner.as_ref() }.next;
+                let cr = unsafe { c_inner.as_ref() };
+                i += if cr.is_visible() { 1 } else { 0 };
+                c = cr.next;
             }
             i
         } else if *ai > 1000 && *ai < 3000 {
-            let Some(sel) = unsafe { globals.selmon.as_ref() }.sel else {
+            let Some(sel) = selmon.sel else {
                 return -1;
             };
             let mut i = 0;
-            let mut c = unsafe { globals.selmon.as_ref() }.clients;
+            let mut c = selmon.clients;
             while let Some(c_inner) = c
                 && c_inner != sel
             {
-                i += if unsafe { c_inner.as_ref() }.is_visible() {
-                    1
-                } else {
-                    0
-                };
-                c = unsafe { c_inner.as_ref() }.next;
+                let cr = unsafe { c_inner.as_ref() };
+                i += if cr.is_visible() { 1 } else { 0 };
+                c = cr.next;
             }
             let mut n = i;
             while let Some(c_inner) = c {
-                n += if unsafe { c_inner.as_ref() }.is_visible() {
-                    1
-                } else {
-                    0
-                };
-                c = unsafe { c_inner.as_ref() }.next;
+                let cr = unsafe { c_inner.as_ref() };
+                n += if cr.is_visible() { 1 } else { 0 };
+                c = cr.next;
             }
             (i + (*ai - 2000)).rem_euclid(n)
         } else if *ai < 0 {
             let mut i = 0;
-            let mut c = unsafe { globals.selmon.as_ref() }.clients;
+            let mut c = selmon.clients;
             while let Some(c_inner) = c {
-                i += if unsafe { c_inner.as_ref() }.is_visible() {
-                    1
-                } else {
-                    0
-                };
-                c = unsafe { c_inner.as_ref() }.next;
+                let cr = unsafe { c_inner.as_ref() };
+                i += if cr.is_visible() { 1 } else { 0 };
+                c = cr.next;
             }
             (i + *ai).max(0)
         } else {
@@ -420,49 +403,43 @@ impl Arg {
         let Arg::I(i) = self else {
             unreachable!("invalid input to incnmaster")
         };
-        unsafe { globals.selmon.as_mut() }.nmaster =
-            (unsafe { globals.selmon.as_ref() }.nmaster + *i).max(0);
+        let selmon = unsafe { globals.selmon.as_mut() };
+        selmon.nmaster = (selmon.nmaster + *i).max(0);
         Monitor::arrange(Some(globals.selmon), globals);
     }
 
     #[allow(dead_code)]
     pub(crate) fn setcfact(&self, globals: &mut Globals) {
-        let c = unsafe { globals.selmon.as_ref() }.sel;
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let c = selmon.sel;
 
-        if c.is_none()
-            || unsafe { globals.selmon.as_ref() }.lt
-                [unsafe { globals.selmon.as_ref() }.sellt as usize]
-                .arrange
-                .is_none()
-        {
+        if c.is_none() || selmon.lt[selmon.sellt as usize].arrange.is_none() {
             return;
         }
-        let mut c = c.expect("checked to be Some");
+        let c = unsafe { c.expect("checked to be Some").as_mut() };
 
         let Arg::F(fa) = self else {
             unreachable!("invalid argument to setcfact function")
         };
-        let mut f = *fa + unsafe { c.as_ref() }.cfact;
+        let mut f = *fa + c.cfact;
         if *fa == 0.0 {
             f = 1.0;
         } else if !(0.25..=4.0).contains(&f) {
             return;
         }
-        unsafe { c.as_mut() }.cfact = f;
+        c.cfact = f;
         Monitor::arrange(Some(globals.selmon), globals);
     }
 
     pub(crate) fn setmfact(&self, globals: &mut Globals) {
-        if unsafe { globals.selmon.as_ref() }.lt[unsafe { globals.selmon.as_ref() }.sellt as usize]
-            .arrange
-            .is_none()
-        {
+        let selmon = unsafe { globals.selmon.as_mut() };
+        if selmon.lt[selmon.sellt as usize].arrange.is_none() {
             return;
         }
         let f = match self {
             Arg::F(f) => {
                 if *f < 1.0 {
-                    f + unsafe { globals.selmon.as_ref() }.mfact
+                    f + selmon.mfact
                 } else {
                     f - 1.0
                 }
@@ -472,26 +449,25 @@ impl Arg {
         if !(0.5..=0.95).contains(&f) {
             return;
         }
-        unsafe { globals.selmon.as_mut() }.mfact = f;
+        selmon.mfact = f;
         Monitor::arrange(Some(globals.selmon), globals);
     }
 
     pub(crate) fn zoom(&self, globals: &mut Globals) {
-        let mut c = unsafe { globals.selmon.as_ref() }.sel;
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mut c = selmon.sel;
 
-        if unsafe { globals.selmon.as_ref() }.lt[unsafe { globals.selmon.as_ref() }.sellt as usize]
-            .arrange
-            .is_none()
-        {
+        if selmon.lt[selmon.sellt as usize].arrange.is_none() {
             return;
         }
         let Some(mut c_inner) = c else {
             return;
         };
+
         if unsafe { c_inner.as_ref() }.isfloating {
             return;
         }
-        if c == Client::nexttiled(unsafe { globals.selmon.as_ref() }.clients) {
+        if c == Client::nexttiled(selmon.clients) {
             c = Client::nexttiled(unsafe { c_inner.as_ref() }.next);
             if c.is_none() {
                 return;
@@ -505,16 +481,9 @@ impl Arg {
         globals.resources = crate::resource::load_xresources();
 
         for (i, pallette) in crate::config::COLORS.iter().enumerate() {
-            let mut pallette_iter = pallette.iter().map(|name| {
-                let ResourceVal::String(color) = globals
-                    .resources
-                    .get(name)
-                    .expect("Color is present in the resources map")
-                else {
-                    die!("Color is not of type string in resoures map")
-                };
-                color.as_str()
-            });
+            let mut pallette_iter = pallette
+                .iter()
+                .map(|name| borrow_resource!(name, globals, String).as_str());
             let pallette: [&str; crate::config::COLORS[0].len()] = std::array::from_fn(|_| {
                 pallette_iter.next().expect(
                 "we know by construction that there exists a constant number of values in the map",
@@ -564,18 +533,16 @@ impl Arg {
     }
 
     pub(crate) fn tagmon(&self, globals: &mut Globals) {
-        if unsafe { globals.selmon.as_ref() }.sel.is_none()
-            || unsafe { globals.mons.as_ref() }.next.is_none()
-        {
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mons = unsafe { globals.mons.as_ref() };
+        if selmon.sel.is_none() || mons.next.is_none() {
             return;
         }
         let Arg::I(i) = self else {
             unreachable!("invalid argument to tagmon")
         };
         Client::sendmon(
-            unsafe { globals.selmon.as_ref() }
-                .sel
-                .expect("checked above to be not None"),
+            selmon.sel.expect("checked above to be not None"),
             Monitor::dirtomon(*i, globals),
             globals,
         );
@@ -583,15 +550,16 @@ impl Arg {
 
     pub(crate) fn movemouse(&self, globals: &mut Globals) {
         const GRAB_SUCCESS: i32 = 0;
+        let selmon = unsafe { globals.selmon.as_ref() };
 
-        let Some(mut c) = unsafe { globals.selmon.as_ref() }.sel else {
+        let Some(mut c) = selmon.sel else {
             return;
         };
-        if unsafe { c.as_ref() }.isfullscreen {
+        let c_ref = unsafe { c.as_ref() };
+        if c_ref.isfullscreen {
             return;
         }
-        let c_ref = unsafe { c.as_ref() };
-        unsafe { globals.selmon.as_ref() }.restack(globals);
+        selmon.restack(globals);
         let ocx = c_ref.x;
         let ocy = c_ref.y;
         if unsafe {
@@ -626,66 +594,43 @@ impl Arg {
                     &mut ev,
                 )
             };
-            match unsafe { ev.r#type } {
+            let ty = unsafe { ev.r#type };
+            match ty {
                 CONFIGURE_REQUEST | EXPOSE | MAP_REQUEST => {
-                    crate::event::event_handler(unsafe { ev.r#type }).expect("valid function")(
-                        &mut ev, globals,
-                    )
+                    crate::event::event_handler(ty).expect("valid function")(&mut ev, globals)
                 }
                 MOTION_NOTIFY => {
-                    if unsafe { ev.xmotion }.time - lasttime
-                        <= 1000 / crate::config::REFRESH_RATE as u64
-                    {
+                    let motion = unsafe { &ev.xmotion };
+                    if motion.time - lasttime <= 1000 / crate::config::REFRESH_RATE as u64 {
                         continue;
                     }
-                    lasttime = unsafe { ev.xmotion.time };
+                    lasttime = motion.time;
 
-                    let mut nx = ocx + (unsafe { ev.xmotion.x } - x);
-                    let mut ny = ocy + (unsafe { ev.xmotion.y } - y);
+                    let mut nx = ocx + (motion.x - x);
+                    let mut ny = ocy + (motion.y - y);
 
                     // let snap = load_resource_int("SNAP", globals);
                     let snap = load_resource!("SNAP", globals, Integer);
 
-                    if (unsafe { globals.selmon.as_ref().wx } - nx).abs() < snap as i32 {
-                        nx = unsafe { globals.selmon.as_ref().wx };
-                    } else if ((unsafe { globals.selmon.as_ref().wx }
-                        + unsafe { globals.selmon.as_ref().ww })
-                        - (nx + unsafe { c.as_ref().width() }))
-                    .abs()
-                        < snap as i32
-                    {
-                        nx = unsafe { globals.selmon.as_ref().wx }
-                            + unsafe { globals.selmon.as_ref().ww }
-                            - unsafe { c.as_ref().width() };
+                    if (selmon.wx - nx).abs() < snap as i32 {
+                        nx = selmon.wx;
+                    } else if ((selmon.wx + selmon.ww) - (nx + c_ref.width())).abs() < snap as i32 {
+                        nx = selmon.wx + selmon.ww - c_ref.width();
                     }
-                    if (unsafe { globals.selmon.as_ref().wy } - ny).abs() < snap as i32 {
-                        ny = unsafe { globals.selmon.as_ref().wy };
-                    } else if ((unsafe { globals.selmon.as_ref().wy }
-                        + unsafe { globals.selmon.as_ref().wh })
-                        - (ny + unsafe { c.as_ref().height() }))
-                    .abs()
-                        < snap as i32
+                    if (selmon.wy - ny).abs() < snap as i32 {
+                        ny = selmon.wy;
+                    } else if ((selmon.wy + selmon.wh) - (ny + c_ref.height())).abs() < snap as i32
                     {
-                        ny = unsafe { globals.selmon.as_ref().wy }
-                            + unsafe { globals.selmon.as_ref().wh }
-                            - unsafe { c.as_ref().height() };
+                        ny = selmon.wy + selmon.wh - c_ref.height();
                     }
-                    if !unsafe { c.as_ref().isfloating }
-                        && unsafe { globals.selmon.as_ref().lt }
-                            [unsafe { globals.selmon.as_ref().sellt } as usize]
-                            .arrange
-                            .is_some()
-                        && ((nx - unsafe { c.as_ref().x }).abs() > snap as i32
-                            || (ny - unsafe { c.as_ref().y }).abs() > snap as i32)
+                    if !c_ref.isfloating
+                        && selmon.lt[selmon.sellt as usize].arrange.is_some()
+                        && ((nx - c_ref.x).abs() > snap as i32
+                            || (ny - c_ref.y).abs() > snap as i32)
                     {
                         Arg::I(0).togglefloating(globals);
                     }
-                    if unsafe { globals.selmon.as_ref().lt }
-                        [unsafe { globals.selmon.as_ref().sellt } as usize]
-                        .arrange
-                        .is_none()
-                        || unsafe { c.as_ref().isfloating }
-                    {
+                    if selmon.lt[selmon.sellt as usize].arrange.is_none() || c_ref.isfloating {
                         let c = unsafe { c.as_mut() };
                         // let (w, h) = unsafe { (c.as_ref().w, c.as_ref().h) };
                         c.resize(nx, ny, c.w, c.h, true, globals);
@@ -693,18 +638,12 @@ impl Arg {
                 }
                 _ => {}
             }
-            if unsafe { ev.r#type } == BUTTON_RELEASE {
+            if ty == BUTTON_RELEASE {
                 break;
             }
         }
         unsafe { XUngrabPointer(globals.dpy.as_ptr(), CURRENT_TIME) };
-        let m = Monitor::recttomon(
-            unsafe { c.as_ref() }.x,
-            unsafe { c.as_ref() }.y,
-            unsafe { c.as_ref() }.w,
-            unsafe { c.as_ref() }.h,
-            globals,
-        );
+        let m = Monitor::recttomon(c_ref.x, c_ref.y, c_ref.w, c_ref.h, globals);
         if m != globals.selmon {
             Client::sendmon(c, m, globals);
             globals.selmon = m;
@@ -715,14 +654,15 @@ impl Arg {
     pub(crate) fn resizemouse(&self, globals: &mut Globals) {
         const GRAB_SUCCESS: i32 = 0;
 
-        let Some(mut c) = unsafe { globals.selmon.as_ref() }.sel else {
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let Some(mut c) = selmon.sel else {
             return;
         };
-        let cr = unsafe { c.as_ref() }; /* no support resizing fullscreen windows by mouse */
+        let cr = unsafe { c.as_mut() }; /* no support resizing fullscreen windows by mouse */
         if cr.isfullscreen {
             return;
         }
-        unsafe { globals.selmon.as_ref() }.restack(globals);
+        selmon.restack(globals);
         let ocx = cr.x;
         let ocy = cr.y;
         if unsafe {
@@ -765,57 +705,43 @@ impl Arg {
                     &mut ev,
                 )
             };
-            match unsafe { ev.r#type } {
+            let ty = unsafe { ev.r#type };
+            match ty {
                 CONFIGURE_REQUEST | EXPOSE | MAP_REQUEST => {
-                    crate::event::event_handler(unsafe { ev.r#type }).expect("valid function")(
-                        &mut ev, globals,
-                    )
+                    crate::event::event_handler(ty).expect("valid function")(&mut ev, globals)
                 }
                 MOTION_NOTIFY => {
-                    if unsafe { ev.xmotion.time } - lasttime
-                        <= 1000 / crate::config::REFRESH_RATE as u64
-                    {
+                    let motion = unsafe { &ev.xmotion };
+                    if motion.time - lasttime <= 1000 / crate::config::REFRESH_RATE as u64 {
                         continue;
                     }
-                    lasttime = unsafe { ev.xmotion.time };
+                    lasttime = motion.time;
 
-                    let nw = 1.max(unsafe { ev.xmotion.x } - ocx - 2 * cr.bw + 1);
-                    let nh = 1.max(unsafe { ev.xmotion.y } - ocy - 2 * cr.bw + 1);
+                    let nw = 1.max(motion.x - ocx - 2 * cr.bw + 1);
+                    let nh = 1.max(motion.y - ocy - 2 * cr.bw + 1);
 
                     // let snap = load_resource_int("SNAP", globals);
                     let snap = load_resource!("SNAP", globals, Integer);
 
-                    if unsafe { cr.mon.as_ref().wx } + nw >= unsafe { globals.selmon.as_ref().wx }
-                        && unsafe { cr.mon.as_ref().wx } + nw
-                            <= unsafe { globals.selmon.as_ref().wx }
-                                + unsafe { globals.selmon.as_ref().ww }
-                        && unsafe { cr.mon.as_ref().wy } + nh
-                            >= unsafe { globals.selmon.as_ref().wy }
-                        && unsafe { cr.mon.as_ref().wy } + nh
-                            <= unsafe { globals.selmon.as_ref().wy }
-                                + unsafe { globals.selmon.as_ref().wh }
+                    let mon = unsafe { cr.mon.as_ref() };
+                    if mon.wx + nw >= selmon.wx
+                        && mon.wx + nw <= selmon.wx + selmon.ww
+                        && mon.wy + nh >= selmon.wy
+                        && mon.wy + nh <= selmon.wy + selmon.wh
                         && !cr.isfloating
-                        && unsafe { globals.selmon.as_ref().lt }
-                            [unsafe { globals.selmon.as_ref().sellt } as usize]
-                            .arrange
-                            .is_some()
+                        && selmon.lt[selmon.sellt as usize].arrange.is_some()
                         && ((nw - cr.w).abs() > snap as i32 || (nh - cr.h).abs() > snap as i32)
                     {
                         Arg::I(0).togglefloating(globals);
                     }
 
-                    if unsafe { globals.selmon.as_ref().lt }
-                        [unsafe { globals.selmon.as_ref().sellt } as usize]
-                        .arrange
-                        .is_none()
-                        || cr.isfloating
-                    {
-                        unsafe { c.as_mut() }.resize(cr.x, cr.y, nw, nh, true, globals);
+                    if selmon.lt[selmon.sellt as usize].arrange.is_none() || cr.isfloating {
+                        cr.resize(cr.x, cr.y, nw, nh, true, globals);
                     }
                 }
                 _ => {}
             }
-            if unsafe { ev.r#type } == BUTTON_RELEASE {
+            if ty == BUTTON_RELEASE {
                 break;
             }
         }
@@ -863,10 +789,10 @@ impl Arg {
 
     #[allow(dead_code)]
     pub(crate) fn shifttag(&self, globals: &mut Globals) {
-        let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mut shifted = selmon.tagset[selmon.seltags as usize];
 
-        if unsafe { globals.selmon.as_ref() }.clients.is_none() {
+        if selmon.clients.is_none() {
             return;
         }
         let Arg::I(ai) = self else {
@@ -877,13 +803,14 @@ impl Arg {
     }
 
     pub(crate) fn shifttagclients(&self, globals: &mut Globals) {
-        let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mut shifted = selmon.tagset[selmon.seltags as usize];
         let mut tagmask = 0u32;
-        let mut c = unsafe { globals.selmon.as_ref() }.clients;
+        let mut c = selmon.clients;
         while let Some(c_inner) = c {
-            tagmask |= unsafe { c_inner.as_ref() }.tags;
-            c = unsafe { c_inner.as_ref() }.next;
+            let cr = unsafe { c_inner.as_ref() };
+            tagmask |= cr.tags;
+            c = cr.next;
         }
 
         let Arg::I(ai) = self else {
@@ -901,8 +828,8 @@ impl Arg {
 
     #[allow(dead_code)]
     pub(crate) fn shiftview(&self, globals: &mut Globals) {
-        let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mut shifted = selmon.tagset[selmon.seltags as usize];
 
         let Arg::I(ai) = self else {
             unreachable!("invalid argument type to shiftview function")
@@ -912,13 +839,14 @@ impl Arg {
     }
 
     pub(crate) fn shiftviewclients(&self, globals: &mut Globals) {
-        let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mut shifted = selmon.tagset[selmon.seltags as usize];
         let mut tagmask = 0u32;
-        let mut c = unsafe { globals.selmon.as_ref() }.clients;
+        let mut c = selmon.clients;
         while let Some(c_inner) = c {
-            tagmask |= unsafe { c_inner.as_ref() }.tags;
-            c = unsafe { c_inner.as_ref() }.next;
+            let cr = unsafe { c_inner.as_ref() };
+            tagmask |= cr.tags;
+            c = cr.next;
         }
 
         let Arg::I(ai) = self else {
@@ -936,8 +864,8 @@ impl Arg {
 
     #[allow(dead_code)]
     pub(crate) fn shiftboth(&self, globals: &mut Globals) {
-        let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mut shifted = selmon.tagset[selmon.seltags as usize];
 
         let Arg::I(ai) = self else {
             unreachable!("invalid argument type to shiftboth function")
@@ -948,29 +876,28 @@ impl Arg {
     }
 
     pub(crate) fn swaptags(&self, globals: &mut Globals) {
+        let selmon = unsafe { globals.selmon.as_ref() };
         let Arg::Ui(ui) = self else {
             unreachable!("invalid argument type to swaptags function")
         };
         let newtag = *ui & TAGMASK;
-        let curtag = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let curtag = selmon.tagset[selmon.seltags as usize];
 
         if newtag == curtag || curtag == 0 || (curtag & (curtag - 1)) != 0 {
             return;
         }
 
-        let mut c = unsafe { globals.selmon.as_ref() }.clients;
+        let mut c = selmon.clients;
         while let Some(mut c_inner) = c {
-            if unsafe { c_inner.as_ref() }.tags & newtag != 0
-                || unsafe { c_inner.as_ref() }.tags & curtag != 0
-            {
-                unsafe { c_inner.as_mut() }.tags ^= curtag ^ newtag;
+            let cr = unsafe { c_inner.as_mut() };
+            if cr.tags & newtag != 0 || cr.tags & curtag != 0 {
+                cr.tags ^= curtag ^ newtag;
             }
-            if unsafe { c_inner.as_ref() }.tags == 0 {
-                unsafe { c_inner.as_mut() }.tags = newtag;
+            if cr.tags == 0 {
+                cr.tags = newtag;
             }
 
-            c = unsafe { c_inner.as_ref() }.next;
+            c = cr.next;
         }
 
         //uncomment to 'view' the new swaped tag
@@ -983,8 +910,8 @@ impl Arg {
 
     #[allow(dead_code)]
     pub(crate) fn shiftswaptags(&self, globals: &mut Globals) {
-        let mut shifted = unsafe { globals.selmon.as_ref() }.tagset
-            [unsafe { globals.selmon.as_ref() }.seltags as usize];
+        let selmon = unsafe { globals.selmon.as_ref() };
+        let mut shifted = selmon.tagset[selmon.seltags as usize];
 
         let Arg::I(ai) = self else {
             unreachable!("invalid argument type to shiftswaptags function")
@@ -1002,10 +929,10 @@ impl Arg {
     #[allow(dead_code)]
     pub(crate) fn defaultgaps(&self, globals: &mut Globals) {
         globals.setgaps(
-            crate::load_resource!("GAPP_OH", globals, Integer) as i32,
-            crate::load_resource!("GAPP_OV", globals, Integer) as i32,
-            crate::load_resource!("GAPP_IH", globals, Integer) as i32,
-            crate::load_resource!("GAPP_IV", globals, Integer) as i32,
+            load_resource!("GAPP_OH", globals, Integer) as i32,
+            load_resource!("GAPP_OV", globals, Integer) as i32,
+            load_resource!("GAPP_IH", globals, Integer) as i32,
+            load_resource!("GAPP_IV", globals, Integer) as i32,
         );
     }
 

@@ -1,10 +1,11 @@
 use std::{ffi::CString, mem::MaybeUninit, ptr::NonNull};
 
 use crate::event::ClickState;
+use crate::resource::load_resource;
 use crate::{
     BROKEN, Globals, Monitor, NET_ACTIVE_WINDOW, NET_WM_FULLSCREEN, NET_WM_NAME, NET_WM_STATE,
     NET_WM_STICKY, NET_WM_WINDOW_TYPE, NET_WM_WINDOW_TYPE_DIALOG, SCHEME_STATE_NORM,
-    SCHEME_STATE_SEL, SPTAGMASK, TAGMASK, WM_PROTOCOLS, WM_STATE, WM_TAKE_FOCUS, load_resource,
+    SCHEME_STATE_SEL, SPTAGMASK, TAGMASK, WM_PROTOCOLS, WM_STATE, WM_TAKE_FOCUS,
 };
 
 use crate::external_functions::{
