@@ -349,6 +349,7 @@ impl Globals {
                     i += 1;
                 }
 
+                /* removed monitors if n > nn */
                 for _ in nn..n as i32 {
                     let mut m = self.mons;
                     while let Some(next) = unsafe { m.as_ref() }.next {

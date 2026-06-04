@@ -8,5 +8,5 @@ libc = "0.2.186"
 
 
 [features]
-default = []
-xinerama = ["default"]
+default = ["xinerama"]
+xinerama = []
