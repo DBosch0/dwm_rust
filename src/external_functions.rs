@@ -388,8 +388,15 @@ unsafe extern "C" {
     pub(crate) fn XrmInitialize();
 }
 
+#[cfg(feature = "xinerama")]
 #[link(name = "Xinerama")]
-unsafe extern "C" {}
+unsafe extern "C" {
+    pub(crate) fn XineramaIsActive(dpy: *mut Display) -> i32;
+    pub(crate) fn XineramaQueryScreens(
+        dpy: *mut Display,
+        number: &mut i32,
+    ) -> *mut XineramaScreenInfo;
+}
 
 #[link(name = "xcb")]
 unsafe extern "C" {
@@ -610,6 +617,17 @@ pub(crate) struct xcb_res_client_id_value_iterator_t {
     pub(crate) data: *mut xcb_res_client_id_value_t,
     pub(crate) rem: c_int,
     pub(crate) index: c_int,
+}
+
+#[cfg(feature = "xinerama")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct XineramaScreenInfo {
+    pub(crate) screen_number: i32,
+    pub(crate) x_org: i16,
+    pub(crate) y_org: i16,
+    pub(crate) width: i16,
+    pub(crate) height: i16,
 }
 
 #[repr(C)]

@@ -125,7 +125,7 @@ impl Monitor {
                 i32::min(x + w, m_inner_ref.wx + m_inner_ref.ww) - i32::max(x, m_inner_ref.wx),
             ) * i32::max(
                 0,
-                i32::min(y + h, m_inner_ref.wy - m_inner_ref.wh) - i32::max(y, m_inner_ref.wy),
+                i32::min(y + h, m_inner_ref.wy + m_inner_ref.wh) - i32::max(y, m_inner_ref.wy),
             );
 
             if a > area {

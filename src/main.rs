@@ -140,6 +140,20 @@ fn checkotherwm(dpy: NonNull<Display>) {
     }
 }
 
+fn isuniquegeom(unique: &Vec<XineramaScreenInfo>, mut n: usize, info: &XineramaScreenInfo) -> bool {
+    while n > 0 {
+        if unique[n].x_org == info.x_org
+            && unique[n].y_org == info.y_org
+            && unique[n].width == info.width
+            && unique[n].height == info.height
+        {
+            return false;
+        }
+        n -= 1
+    }
+    true
+}
+
 #[derive(Debug)]
 struct Globals {
     stext: [i8; 256],
@@ -265,28 +279,137 @@ impl Globals {
 
         #[cfg(feature = "xinerama")]
         {
-            todo!("feature: xinerama")
+            let mut nn = 0i32;
+            if unsafe { XineramaIsActive(self.dpy.as_ptr()) } != 0 {
+                let info: *mut XineramaScreenInfo =
+                    unsafe { XineramaQueryScreens(self.dpy.as_ptr(), &mut nn) };
+
+                let mut n = 0;
+                // Get number of monitors
+                if self.running {
+                    let mut m = Some(self.mons);
+                    while let Some(m_inner) = m {
+                        m = unsafe { m_inner.as_ref().next };
+                        n += 1;
+                    }
+                }
+
+                // Only consider unique geometries as seperate screen
+                let mut unique: Vec<XineramaScreenInfo> =
+                    vec![unsafe { core::mem::zeroed() }; nn as usize];
+                let mut j = 0;
+                for i in 0..(nn as usize) {
+                    if isuniquegeom(&unique, j, unsafe { &*info.add(i) }) {
+                        unique[j] = unsafe { &*info.add(i) }.clone();
+                        j += 1;
+                    }
+                }
+                unsafe { XFree(info.cast()) };
+                nn = j as i32;
+
+                // new monitors if nn > n
+                for _ in (n as i32)..nn {
+                    if self.running {
+                        let mut m = self.mons;
+                        while let Some(next) = unsafe { m.as_ref() }.next {
+                            m = next;
+                        }
+                        unsafe { m.as_mut().next = Some(Monitor::createmon(self)) };
+                    } else {
+                        self.mons = Monitor::createmon(self);
+                    }
+                }
+
+                let mut m = Some(self.mons);
+                let mut i = 0usize;
+                while i < nn as usize
+                    && let Some(mut m_inner) = m
+                {
+                    let mr = unsafe { m_inner.as_mut() };
+
+                    if i >= n
+                        || unique[i].x_org as i32 != mr.mx
+                        || unique[i].y_org as i32 != mr.my
+                        || unique[i].width as i32 != mr.mw
+                        || unique[i].height as i32 != mr.mh
+                    {
+                        dirty = true;
+                        mr.num = i as i32;
+                        mr.wx = unique[i].x_org as i32;
+                        mr.mx = mr.wx;
+                        mr.wy = unique[i].y_org as i32;
+                        mr.my = mr.wy;
+                        mr.ww = unique[i].width as i32;
+                        mr.mw = mr.ww;
+                        mr.wh = unique[i].height as i32;
+                        mr.mh = mr.wh;
+                        mr.updatebarpos(self);
+                    }
+                    m = mr.next;
+                    i += 1;
+                }
+
+                for _ in nn..n as i32 {
+                    let mut m = self.mons;
+                    while let Some(next) = unsafe { m.as_ref() }.next {
+                        m = next;
+                    }
+                    let mut c = unsafe { m.as_ref() }.clients;
+                    while let Some(mut c_inner) = c {
+                        dirty = true;
+                        unsafe { m.as_mut().clients = c_inner.as_ref().next };
+                        Client::detachstack(c_inner);
+                        unsafe { c_inner.as_mut().mon = self.mons };
+                        Client::attach(c_inner);
+                        Client::attachstack(c_inner);
+                        c = unsafe { m.as_ref().clients };
+                    }
+                    if m == self.selmon {
+                        self.selmon = self.mons;
+                    }
+                    let _ = Monitor::cleanupmon(m, self);
+                }
+                drop(unique);
+            } else {
+                // We are in initialization
+                if !self.running {
+                    self.mons = Monitor::createmon(self);
+                }
+
+                let m = unsafe { self.mons.as_mut() };
+                if m.mw != self.sw || m.mh != self.sh {
+                    dirty = true;
+                    m.ww = self.sw;
+                    m.mw = m.ww;
+                    m.wh = self.sh;
+                    m.mh = m.wh;
+                    m.updatebarpos(self);
+                }
+            }
         }
 
-        // We are in initialization
-        if !self.running {
-            self.mons = Monitor::createmon(self);
+        #[cfg(not(feature = "xinerama"))]
+        {
+            // We are in initialization
+            if !self.running {
+                self.mons = Monitor::createmon(self);
+            }
+
+            let m = unsafe { self.mons.as_mut() };
+            if m.mw != self.sw || m.mh != self.sh {
+                dirty = true;
+                m.ww = self.sw;
+                m.mw = m.ww;
+                m.wh = self.sh;
+                m.mh = m.wh;
+                m.updatebarpos(self);
+            }
         }
 
-        let m = unsafe { self.mons.as_mut() };
-        if m.mw != self.sw || m.mh != self.sh {
-            dirty = true;
-            m.ww = self.sw;
-            m.mw = m.ww;
-            m.wh = self.sh;
-            m.mh = m.wh;
-            m.updatebarpos(self);
-        }
         if dirty {
             self.selmon = self.mons;
             self.selmon = Monitor::wintomon(self.root, self);
         }
-
         dirty
     }
 
